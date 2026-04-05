@@ -31,9 +31,13 @@
     "build": "vp pack",
     "lint": "ultracite check",
     "format": "ultracite fix",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "vp pack && changeset publish"
   },
   "dependencies": {
+    "@changesets/cli": "^2.30.0",
     "@chat-adapter/shared": "^4.23.0",
     "@line/bot-sdk": "^11.0.0"
   },

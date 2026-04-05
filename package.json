@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "description": "LINE Messaging API adapter for Chat SDK",
   "keywords": [
+    "adapter",
+    "bot",
+    "chat",
     "chat-adapter",
     "chat-sdk",
     "line",
-    "messaging-api"
+    "messaging"
   ],
   "license": "MIT",
   "files": [

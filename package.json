@@ -1,6 +1,6 @@
 {
   "name": "chat-adapter-line",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "LINE Messaging API adapter for Chat SDK",
   "keywords": [
     "adapter",

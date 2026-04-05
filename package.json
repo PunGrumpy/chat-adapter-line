@@ -11,7 +11,15 @@
     "line",
     "messaging"
   ],
+  "homepage": "https://github.com/PunGrumpy/chat-adapter-line",
+  "bugs": {
+    "url": "https://github.com/PunGrumpy/chat-adapter-line/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PunGrumpy/chat-adapter-line.git"
+  },
   "files": [
     "dist",
     "README.md"

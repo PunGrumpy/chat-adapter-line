@@ -50,3 +50,23 @@ const adapter = createLineAdapter({
 ## License
 
 [MIT](./LICENSE)
+
+## Benchmarking
+
+This package includes targeted benchmarks for hot paths:
+
+- Markdown normalization (`toPlainText`)
+- Thread ID encode/decode
+- Webhook signature + parse path
+
+Run benchmarks:
+
+```bash
+vp run benchmark
+```
+
+Export JSON results:
+
+```bash
+vp run benchmark:json
+```

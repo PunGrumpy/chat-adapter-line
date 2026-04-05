@@ -218,3 +218,6 @@ next-env.d.ts
 
 # Skills
 !.agents
+
+# Benchmark artifacts
+bench/results.json

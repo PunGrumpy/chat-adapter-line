@@ -23,6 +23,9 @@ export default defineConfig({
     "*.{js,ts,tsx}": "bun run format",
   },
   test: {
+    benchmark: {
+      include: ["bench/**/*.bench.ts"],
+    },
     include: ["__tests__/**/*.test.ts"],
   },
 });

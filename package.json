@@ -41,6 +41,8 @@
     "dev": "vp pack --watch",
     "build": "vp pack",
     "test": "vp test",
+    "benchmark": "vp test bench",
+    "benchmark:json": "vp test bench --outputJson bench/results.json",
     "lint": "ultracite check",
     "format": "ultracite fix",
     "typecheck": "tsc --noEmit",

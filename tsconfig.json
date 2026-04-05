@@ -17,6 +17,6 @@
     "strict": true,
     "target": "ES2022",
     "strictNullChecks": true,
-    "types": ["vite/client"]
+    "types": ["vite/client", "node"]
   }
 }

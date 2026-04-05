@@ -19,6 +19,9 @@ export default defineConfig({
     platform: "node",
     sourcemap: true,
   },
+  staged: {
+    "*.{js,ts,tsx}": "bun run format",
+  },
   test: {
     include: ["__tests__/**/*.test.ts"],
   },

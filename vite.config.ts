@@ -8,13 +8,18 @@ export default defineConfig({
     define: {
       __VERSION__: JSON.stringify(pkg.version),
     },
+    deps: {
+      neverBundle: ["@chat-adapter/shared", "@line/bot-sdk", "chat"],
+    },
     dts: false,
-    entry: "src/main.ts",
-    external: ["chat"],
+    entry: "src/index.ts",
     fixedExtension: false,
     format: ["esm"],
     minify: true,
     platform: "node",
     sourcemap: true,
+  },
+  test: {
+    include: ["__tests__/**/*.test.ts"],
   },
 });

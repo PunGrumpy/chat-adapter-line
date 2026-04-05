@@ -215,3 +215,6 @@ $RECYCLE.BIN/
 
 # Next.js
 next-env.d.ts
+
+# Skills
+!.agents

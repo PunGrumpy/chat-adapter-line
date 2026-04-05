@@ -4,9 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vp dev",
-    "build": "tsc && vp build",
-    "preview": "vp preview",
+    "dev": "vp pack --watch",
+    "build": "vp pack",
     "lint": "ultracite check",
     "format": "ultracite fix"
   },

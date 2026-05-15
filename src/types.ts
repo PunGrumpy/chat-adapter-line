@@ -53,10 +53,38 @@ export interface LineMessageEvent {
   };
 }
 
+/** Raw LINE webhook postback event */
+export interface LinePostbackEvent {
+  type: "postback";
+  postback: {
+    data: string;
+    params?: {
+      date?: string;
+      time?: string;
+      datetime?: string;
+    };
+  };
+  timestamp: number;
+  source: {
+    type: "user" | "group" | "room";
+    userId?: string;
+    groupId?: string;
+    roomId?: string;
+  };
+  replyToken: string;
+  mode: "active" | "standby";
+  webhookEventId: string;
+  deliveryContext: {
+    isRedelivery: boolean;
+  };
+}
+
+export type LineEvent = LineMessageEvent | LinePostbackEvent;
+
 /** Raw LINE webhook payload (top-level) */
 export interface LineWebhookPayload {
   destination: string;
-  events: (LineMessageEvent | Record<string, unknown>)[];
+  events: (LineEvent | Record<string, unknown>)[];
 }
 
 /** Response from LINE send message API */

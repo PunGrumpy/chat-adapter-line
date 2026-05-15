@@ -59,7 +59,9 @@ export const createLineAdapter = (
 export { LineAdapter, LineFormatConverter } from "./adapter.js";
 export type {
   LineAdapterConfig,
+  LineEvent,
   LineMessageEvent,
+  LinePostbackEvent,
   LineRawMessage,
   LineThreadId,
   LineWebhookPayload,

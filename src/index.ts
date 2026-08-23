@@ -68,3 +68,8 @@ export type {
 } from "./types.js";
 export { decodeThreadId, encodeThreadId, isDM } from "./lib/thread-id.js";
 export { toPlainText } from "./lib/to-plain-text.js";
+export {
+  buildFlexMessage,
+  deserializePostbackData,
+  serializePostbackData,
+} from "./lib/flex-messages.js";

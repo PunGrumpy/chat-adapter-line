@@ -13,6 +13,7 @@ import type {
   Adapter,
   AdapterPostableMessage,
   Attachment,
+  Author,
   ChatInstance,
   EmojiValue,
   FetchOptions,
@@ -35,11 +36,17 @@ import {
   stringifyMarkdown,
 } from "chat";
 
+import {
+  buildFlexMessage,
+  deserializePostbackData,
+} from "./lib/flex-messages.js";
 import { decodeThreadId, encodeThreadId, isDM } from "./lib/thread-id.js";
 import { toPlainText } from "./lib/to-plain-text.js";
 import type {
   LineAdapterConfig,
+  LineEvent,
   LineMessageEvent,
+  LinePostbackEvent,
   LineThreadId,
   LineWebhookPayload,
 } from "./types.js";
@@ -68,7 +75,7 @@ const verifySignature = (
   return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(hash));
 };
 
-const getSourceIdFromEvent = (event: LineMessageEvent): string | undefined => {
+const getSourceIdFromEvent = (event: LineEvent): string | undefined => {
   const { source } = event;
   if (source.type === "user") {
     return source.userId;
@@ -89,19 +96,16 @@ const readableToBuffer = async (
   return chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
 };
 
-const isLineMessageEvent = (
-  event: LineMessageEvent | Record<string, unknown>
-): event is LineMessageEvent =>
-  event.type === "message" &&
+const isLineEvent = (
+  event: LineEvent | Record<string, unknown>
+): event is LineEvent =>
+  (event.type === "message" || event.type === "postback") &&
   typeof event.source === "object" &&
   event.source !== null &&
   typeof (event.source as Record<string, unknown>).type === "string" &&
   typeof event.timestamp === "number" &&
   typeof event.replyToken === "string" &&
-  typeof event.message === "object" &&
-  event.message !== null &&
-  typeof (event.message as Record<string, unknown>).type === "string" &&
-  typeof (event.message as Record<string, unknown>).id === "string";
+  typeof event.webhookEventId === "string";
 
 const getMimeType = (type: string): string => {
   if (type === "image") {
@@ -141,7 +145,7 @@ export class LineFormatConverter extends BaseFormatConverter {
   }
 }
 
-export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
+export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   readonly name = "line";
   readonly userName: string;
 
@@ -228,7 +232,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
     const channelId = this.channelId ?? payload.destination;
 
     for (const event of payload.events) {
-      if (!isLineMessageEvent(event)) {
+      if (!isLineEvent(event)) {
         continue;
       }
       if (event.mode !== "active") {
@@ -245,11 +249,15 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
 
       const threadId = encodeThreadId(event.source.type, channelId, sourceId);
 
-      const factory = (): Promise<Message<LineMessageEvent>> =>
-        Promise.resolve(this.parseMessage(event));
-
       try {
-        this.chat.processMessage(this, threadId, factory, options);
+        if (event.type === "postback") {
+          this.processPostbackEvent(event, threadId, options);
+        } else {
+          const factory = (): Promise<Message<LineEvent>> =>
+            Promise.resolve(this.parseMessage(event));
+
+          this.chat.processMessage(this, threadId, factory, options);
+        }
       } catch (error) {
         this.logger.error("processMessage failed", {
           error,
@@ -261,7 +269,47 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
     return new Response("OK", { status: 200 });
   }
 
-  parseMessage(raw: LineMessageEvent): Message<LineMessageEvent> {
+  /**
+   * Dispatches a LINE postback event to the Chat SDK's action handlers
+   * (`chat.onAction`). Button clicks arrive as postback webhooks, so this
+   * is the only path by which flex message buttons become ActionEvents.
+   */
+  private processPostbackEvent(
+    event: LinePostbackEvent,
+    threadId: string,
+    options?: WebhookOptions
+  ): void {
+    const data = deserializePostbackData(event.postback.data);
+    if (!data) {
+      this.logger.debug("Skipping postback with unparseable data", {
+        data: event.postback.data,
+      });
+      return;
+    }
+
+    const userId = event.source.userId ?? "unknown";
+
+    this.chat?.processAction(
+      {
+        actionId: data.id,
+        adapter: this,
+        messageId: event.webhookEventId,
+        raw: event,
+        threadId,
+        user: {
+          fullName: "",
+          isBot: false,
+          isMe: false,
+          userId,
+          userName: userId,
+        },
+        value: data.value,
+      },
+      options
+    );
+  }
+
+  parseMessage(raw: LineMessageEvent): Message<LineEvent> {
     const sourceId = getSourceIdFromEvent(raw);
 
     if (!this.channelId) {
@@ -279,8 +327,16 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
     }
 
     const userId = raw.source.userId ?? "unknown";
-    const text = raw.message.type === "text" ? (raw.message.text ?? "") : "";
     const threadId = encodeThreadId(raw.source.type, this.channelId, sourceId);
+    const author: Author = {
+      fullName: "",
+      isBot: false,
+      isMe: false,
+      userId,
+      userName: userId,
+    };
+
+    const text = raw.message.type === "text" ? (raw.message.text ?? "") : "";
 
     const attachments: Attachment[] = [];
     if (
@@ -301,13 +357,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
 
     return new Message({
       attachments,
-      author: {
-        fullName: "",
-        isBot: false,
-        isMe: false,
-        userId,
-        userName: userId,
-      },
+      author,
       formatted: this.converter.toAst(text),
       id: raw.webhookEventId,
       metadata: {
@@ -323,7 +373,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
   async postMessage(
     threadId: string,
     message: AdapterPostableMessage
-  ): Promise<RawMessage<LineMessageEvent>> {
+  ): Promise<RawMessage<LineEvent>> {
     const { sourceId } = this.decodeThreadId(threadId);
 
     const card = extractCard(message);
@@ -338,8 +388,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
     const lineMessages: messagingApi.Message[] = [];
 
     if (card) {
-      const rendered = this.converter.renderPostable({ card });
-      lineMessages.push({ text: rendered, type: "text" });
+      const flexMessage = buildFlexMessage(card);
+      lineMessages.push(flexMessage);
     } else if (typeof message === "string") {
       lineMessages.push({ text: message, type: "text" });
     } else if ("text" in message && typeof message.text === "string") {
@@ -370,9 +420,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
     threadId: string,
     textStream: AsyncIterable<string | StreamChunk>,
     _options?: StreamOptions
-  ): Promise<RawMessage<LineMessageEvent>> {
+  ): Promise<RawMessage<LineEvent>> {
     const { sourceId } = this.decodeThreadId(threadId);
-    let lastResult: RawMessage<LineMessageEvent> | undefined;
+    let lastResult: RawMessage<LineEvent> | undefined;
     let buffer = "";
     let sentCount = 0;
 
@@ -416,7 +466,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
     result: { sentMessages?: { id: string }[] },
     text: string,
     threadId: string
-  ): RawMessage<LineMessageEvent> {
+  ): RawMessage<LineEvent> {
     const messageId = result.sentMessages?.[0]?.id ?? "";
     return {
       id: messageId,
@@ -438,7 +488,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
     };
   }
 
-  private buildEmptyRawMessage(threadId: string): RawMessage<LineMessageEvent> {
+  private buildEmptyRawMessage(threadId: string): RawMessage<LineEvent> {
     return {
       id: "",
       raw: {
@@ -459,7 +509,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
     _threadId: string,
     _messageId: string,
     _message: AdapterPostableMessage
-  ): Promise<RawMessage<LineMessageEvent>> {
+  ): Promise<RawMessage<LineEvent>> {
     throw new PermissionError("line", "LINE does not support message editing");
   }
 
@@ -486,7 +536,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineMessageEvent> {
   fetchMessages(
     _threadId: string,
     _options?: FetchOptions
-  ): Promise<FetchResult<LineMessageEvent>> {
+  ): Promise<FetchResult<LineEvent>> {
     throw new PermissionError("line", "LINE does not provide message history");
   }
 

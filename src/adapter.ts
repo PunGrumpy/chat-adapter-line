@@ -20,7 +20,6 @@ import type {
   FetchResult,
   FormattedContent,
   Logger,
-  MessageMetadata,
   RawMessage,
   Root,
   StreamChunk,
@@ -46,6 +45,8 @@ import { toPlainText } from "./lib/to-plain-text.js";
 import type {
   LineAdapterConfig,
   LineEvent,
+  LineMessageEvent,
+  LinePostbackEvent,
   LineThreadId,
   LineWebhookPayload,
 } from "./types.js";
@@ -127,17 +128,6 @@ const extractStreamText = (chunk: string | StreamChunk): string => {
     return chunk.text;
   }
   return "";
-};
-
-/**
- * Message metadata extended with postback details. The Chat SDK's
- * `MessageMetadata` is a closed interface, so the adapter carries the
- * parsed action ID and value as extra fields for consumers inspecting
- * postback-originated messages.
- */
-type LineMessageMetadata = MessageMetadata & {
-  actionIds?: string[];
-  actionValue?: string;
 };
 
 export class LineFormatConverter extends BaseFormatConverter {
@@ -259,11 +249,15 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
       const threadId = encodeThreadId(event.source.type, channelId, sourceId);
 
-      const factory = (): Promise<Message<LineEvent>> =>
-        Promise.resolve(this.parseMessage(event));
-
       try {
-        this.chat.processMessage(this, threadId, factory, options);
+        if (event.type === "postback") {
+          this.processPostbackEvent(event, threadId, options);
+        } else {
+          const factory = (): Promise<Message<LineEvent>> =>
+            Promise.resolve(this.parseMessage(event));
+
+          this.chat.processMessage(this, threadId, factory, options);
+        }
       } catch (error) {
         this.logger.error("processMessage failed", {
           error,
@@ -275,7 +269,47 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     return new Response("OK", { status: 200 });
   }
 
-  parseMessage(raw: LineEvent): Message<LineEvent> {
+  /**
+   * Dispatches a LINE postback event to the Chat SDK's action handlers
+   * (`chat.onAction`). Button clicks arrive as postback webhooks, so this
+   * is the only path by which flex message buttons become ActionEvents.
+   */
+  private processPostbackEvent(
+    event: LinePostbackEvent,
+    threadId: string,
+    options?: WebhookOptions
+  ): void {
+    const data = deserializePostbackData(event.postback.data);
+    if (!data) {
+      this.logger.debug("Skipping postback with unparseable data", {
+        data: event.postback.data,
+      });
+      return;
+    }
+
+    const userId = event.source.userId ?? "unknown";
+
+    this.chat?.processAction(
+      {
+        actionId: data.id,
+        adapter: this,
+        messageId: event.webhookEventId,
+        raw: event,
+        threadId,
+        user: {
+          fullName: "",
+          isBot: false,
+          isMe: false,
+          userId,
+          userName: userId,
+        },
+        value: data.value,
+      },
+      options
+    );
+  }
+
+  parseMessage(raw: LineMessageEvent): Message<LineEvent> {
     const sourceId = getSourceIdFromEvent(raw);
 
     if (!this.channelId) {
@@ -301,30 +335,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       userId,
       userName: userId,
     };
-
-    if (raw.type === "postback") {
-      const data = deserializePostbackData(raw.postback.data);
-
-      const metadata: LineMessageMetadata = {
-        dateSent: new Date(raw.timestamp),
-        edited: false,
-      };
-      if (data) {
-        metadata.actionIds = [data.id];
-        metadata.actionValue = data.value;
-      }
-
-      return new Message({
-        attachments: [],
-        author,
-        formatted: this.converter.toAst(""),
-        id: raw.webhookEventId,
-        metadata,
-        raw,
-        text: "",
-        threadId,
-      });
-    }
 
     const text = raw.message.type === "text" ? (raw.message.text ?? "") : "";
 

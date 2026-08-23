@@ -13,7 +13,7 @@ import {
 import type { Mock } from "vite-plus/test";
 
 import { LineAdapter, LineFormatConverter } from "../src/adapter.js";
-import type { LineMessageEvent } from "../src/types.js";
+import type { LineMessageEvent, LinePostbackEvent } from "../src/types.js";
 
 // Mock @line/bot-sdk - factory is self-contained
 vi.mock("@line/bot-sdk", () => {
@@ -147,6 +147,20 @@ const makeEvent = (
   timestamp: Date.now(),
   type: "message",
   webhookEventId: "evt-1",
+  ...overrides,
+});
+
+const makePostbackEvent = (
+  overrides: Partial<LinePostbackEvent> = {}
+): LinePostbackEvent => ({
+  deliveryContext: { isRedelivery: false },
+  mode: "active",
+  postback: { data: "id=btn-1&v=order-42" },
+  replyToken: "reply-1",
+  source: { type: "user", userId: "u-123" },
+  timestamp: Date.now(),
+  type: "postback",
+  webhookEventId: "evt-pb-1",
   ...overrides,
 });
 
@@ -348,7 +362,11 @@ describe("LineAdapter", () => {
   });
 
   describe("handleWebhook", () => {
-    let mockChat: { processMessage: Mock; getLogger: Mock };
+    let mockChat: {
+      processMessage: Mock;
+      processAction: Mock;
+      getLogger: Mock;
+    };
 
     beforeEach(async () => {
       mockChat = {
@@ -358,6 +376,7 @@ describe("LineAdapter", () => {
           info: vi.fn(),
           warn: vi.fn(),
         })),
+        processAction: vi.fn(),
         processMessage: vi.fn(),
       };
 
@@ -413,6 +432,64 @@ describe("LineAdapter", () => {
 
       expect(response.status).toBe(200);
       expect(mockChat.processMessage).toHaveBeenCalledOnce();
+    });
+
+    it("dispatches postback events as actions", async () => {
+      const payload = {
+        destination: "ch-123",
+        events: [makePostbackEvent()],
+      };
+      const body = JSON.stringify(payload);
+      const sig = generateSignature(body, validConfig.channelSecret);
+      const request = makeRequest(body, sig);
+
+      const response = await adapter.handleWebhook(request);
+
+      expect(response.status).toBe(200);
+      expect(mockChat.processAction).toHaveBeenCalledOnce();
+      expect(mockChat.processMessage).not.toHaveBeenCalled();
+
+      const [[actionEvent]] = mockChat.processAction.mock.calls;
+      expect(actionEvent).toMatchObject({
+        actionId: "btn-1",
+        messageId: "evt-pb-1",
+        threadId: "line:bot-123:user:u-123",
+        value: "order-42",
+      });
+      expect(actionEvent.adapter).toBe(adapter);
+      expect(actionEvent.user).toMatchObject({ userId: "u-123" });
+    });
+
+    it("skips postback events with unparseable data", async () => {
+      const payload = {
+        destination: "ch-123",
+        events: [makePostbackEvent({ postback: { data: "garbage" } })],
+      };
+      const body = JSON.stringify(payload);
+      const sig = generateSignature(body, validConfig.channelSecret);
+      const request = makeRequest(body, sig);
+
+      const response = await adapter.handleWebhook(request);
+
+      expect(response.status).toBe(200);
+      expect(mockChat.processAction).not.toHaveBeenCalled();
+      expect(mockChat.processMessage).not.toHaveBeenCalled();
+    });
+
+    it("dispatches postback without value as action without value", async () => {
+      const payload = {
+        destination: "ch-123",
+        events: [makePostbackEvent({ postback: { data: "id=btn-2" } })],
+      };
+      const body = JSON.stringify(payload);
+      const sig = generateSignature(body, validConfig.channelSecret);
+      const request = makeRequest(body, sig);
+
+      await adapter.handleWebhook(request);
+
+      const [[actionEvent]] = mockChat.processAction.mock.calls;
+      expect(actionEvent.actionId).toBe("btn-2");
+      expect(actionEvent.value).toBeUndefined();
     });
 
     it("skips non-message events", async () => {

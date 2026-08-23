@@ -13,12 +13,14 @@ import type {
   Adapter,
   AdapterPostableMessage,
   Attachment,
+  Author,
   ChatInstance,
   EmojiValue,
   FetchOptions,
   FetchResult,
   FormattedContent,
   Logger,
+  MessageMetadata,
   RawMessage,
   Root,
   StreamChunk,
@@ -125,6 +127,17 @@ const extractStreamText = (chunk: string | StreamChunk): string => {
     return chunk.text;
   }
   return "";
+};
+
+/**
+ * Message metadata extended with postback details. The Chat SDK's
+ * `MessageMetadata` is a closed interface, so the adapter carries the
+ * parsed action ID and value as extra fields for consumers inspecting
+ * postback-originated messages.
+ */
+type LineMessageMetadata = MessageMetadata & {
+  actionIds?: string[];
+  actionValue?: string;
 };
 
 export class LineFormatConverter extends BaseFormatConverter {
@@ -281,29 +294,32 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     const userId = raw.source.userId ?? "unknown";
     const threadId = encodeThreadId(raw.source.type, this.channelId, sourceId);
+    const author: Author = {
+      fullName: "",
+      isBot: false,
+      isMe: false,
+      userId,
+      userName: userId,
+    };
 
     if (raw.type === "postback") {
       const data = deserializePostbackData(raw.postback.data);
-      const actionIds = data?.id ? [data.id] : undefined;
-      const metadata = data?.value ? { actionValue: data.value } : undefined;
+
+      const metadata: LineMessageMetadata = {
+        dateSent: new Date(raw.timestamp),
+        edited: false,
+      };
+      if (data) {
+        metadata.actionIds = [data.id];
+        metadata.actionValue = data.value;
+      }
 
       return new Message({
         attachments: [],
-        author: {
-          fullName: "",
-          isBot: false,
-          isMe: false,
-          userId,
-          userName: userId,
-        },
+        author,
         formatted: this.converter.toAst(""),
         id: raw.webhookEventId,
-        metadata: {
-          dateSent: new Date(raw.timestamp),
-          edited: false,
-          ...(actionIds ? { actionIds } : {}),
-          ...metadata,
-        },
+        metadata,
         raw,
         text: "",
         threadId,
@@ -331,13 +347,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     return new Message({
       attachments,
-      author: {
-        fullName: "",
-        isBot: false,
-        isMe: false,
-        userId,
-        userName: userId,
-      },
+      author,
       formatted: this.converter.toAst(text),
       id: raw.webhookEventId,
       metadata: {
@@ -365,8 +375,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       });
     }
 
-    const lineMessages: (messagingApi.Message | messagingApi.FlexMessage)[] =
-      [];
+    const lineMessages: messagingApi.Message[] = [];
 
     if (card) {
       const flexMessage = buildFlexMessage(card);

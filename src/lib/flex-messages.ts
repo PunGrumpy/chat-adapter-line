@@ -1,7 +1,13 @@
 import { ValidationError } from "@chat-adapter/shared";
 import type { messagingApi } from "@line/bot-sdk";
+import type { ButtonElement, CardElement } from "chat";
 
+/** LINE caps postback `data` at 300 characters. */
 const MAX_POSTBACK_DATA_LENGTH = 300;
+/** LINE caps button labels at 20 characters. */
+const MAX_BUTTON_LABEL_LENGTH = 20;
+/** LINE caps display text on postback actions at 300 characters. */
+const MAX_ACTION_DISPLAY_TEXT_LENGTH = 300;
 
 /**
  * Serializes a button ID and value into a URL-encoded string.
@@ -27,6 +33,7 @@ export const serializePostbackData = (id: string, value?: string): string => {
 
 /**
  * Deserializes a URL-encoded string back into an ID and value.
+ * Returns null when the data has no parseable `id` parameter.
  */
 export const deserializePostbackData = (
   data: string
@@ -34,160 +41,109 @@ export const deserializePostbackData = (
   try {
     const params = new URLSearchParams(data);
     const id = params.get("id");
-    const value = params.get("v") || undefined;
-
     if (!id) {
       return null;
     }
-
-    return { id, value };
+    return { id, value: params.get("v") || undefined };
   } catch {
     return null;
   }
 };
 
-/**
- * Converts Chat SDK Card JSX into a LINE Flex Message payload.
- */
-// eslint-disable-next-line complexity
-export const buildFlexMessage = (card: unknown): messagingApi.FlexMessage => {
-  const bodyContents: messagingApi.FlexComponent[] = [];
-  const footerContents: messagingApi.FlexButton[] = [];
+const toFlexText = (
+  text: string,
+  options: Partial<
+    Pick<messagingApi.FlexText, "size" | "weight" | "color" | "margin">
+  > = {}
+): messagingApi.FlexText => ({
+  text,
+  type: "text",
+  wrap: true,
+  ...options,
+});
 
-  const typedCard = card as Record<string, unknown>;
-  const props = (typedCard?.props as Record<string, unknown>) || {};
+const buildBodyContents = (card: CardElement): messagingApi.FlexComponent[] => {
+  const contents: messagingApi.FlexComponent[] = [];
 
-  if (props.title) {
-    bodyContents.push({
-      size: "xl",
-      text: props.title as string,
-      type: "text",
-      weight: "bold",
-      wrap: true,
-    });
+  if (card.title) {
+    contents.push(toFlexText(card.title, { size: "xl", weight: "bold" }));
   }
 
-  let children: unknown[];
-  if (Array.isArray(props.children)) {
-    ({ children } = props);
-  } else if (props.children) {
-    children = [props.children];
-  } else {
-    children = [];
+  for (const child of card.children) {
+    if (child.type === "text") {
+      contents.push(toFlexText(child.content, { margin: "md", size: "md" }));
+    } else if (child.type === "section") {
+      for (const sectionChild of child.children) {
+        if (sectionChild.type === "text") {
+          contents.push(
+            toFlexText(sectionChild.content, { margin: "sm", size: "sm" })
+          );
+        }
+      }
+    }
   }
 
-  for (const child of children) {
-    if (!child || typeof child !== "object") {
+  return contents;
+};
+
+const buildFooterButton = (
+  button: ButtonElement
+): messagingApi.FlexButton | null => {
+  if (!button.id) {
+    return null;
+  }
+
+  const label = button.label || button.id;
+
+  return {
+    action: {
+      data: serializePostbackData(button.id, button.value),
+      displayText: label.slice(0, MAX_ACTION_DISPLAY_TEXT_LENGTH),
+      label: label.slice(0, MAX_BUTTON_LABEL_LENGTH),
+      type: "postback",
+    },
+    style: button.style === "primary" ? "primary" : "secondary",
+    type: "button",
+  };
+};
+
+const buildFooterContents = (card: CardElement): messagingApi.FlexButton[] => {
+  const buttons: messagingApi.FlexButton[] = [];
+
+  for (const child of card.children) {
+    if (child.type !== "actions") {
       continue;
     }
 
-    const typedChild = child as Record<string, unknown>;
-    const { type } = typedChild;
-    const childProps = (typedChild.props as Record<string, unknown>) || {};
-
-    if (type === "CardText") {
-      bodyContents.push({
-        margin: "md",
-        size: "md",
-        text: (childProps.children as string) || "",
-        type: "text",
-        wrap: true,
-      });
-    } else if (type === "Section") {
-      if (childProps.title) {
-        bodyContents.push({
-          color: "#aaaaaa",
-          margin: "md",
-          size: "sm",
-          text: childProps.title as string,
-          type: "text",
-          weight: "bold",
-        });
+    for (const actionChild of child.children) {
+      if (actionChild.type !== "button") {
+        continue;
       }
 
-      let sectionChildren: unknown[];
-      if (Array.isArray(childProps.children)) {
-        sectionChildren = childProps.children;
-      } else if (childProps.children) {
-        sectionChildren = [childProps.children];
-      } else {
-        sectionChildren = [];
-      }
-
-      for (const sectionChild of sectionChildren) {
-        if (!sectionChild || typeof sectionChild !== "object") {
-          continue;
-        }
-
-        const typedSectionChild = sectionChild as Record<string, unknown>;
-        const sectionChildType = typedSectionChild.type;
-        const sectionChildProps =
-          (typedSectionChild.props as Record<string, unknown>) || {};
-
-        if (sectionChildType === "CardText") {
-          bodyContents.push({
-            margin: "sm",
-            size: "sm",
-            text: (sectionChildProps.children as string) || "",
-            type: "text",
-            wrap: true,
-          });
-        }
-      }
-    } else if (type === "Actions") {
-      let actionChildren: unknown[];
-      if (Array.isArray(childProps.children)) {
-        actionChildren = childProps.children;
-      } else if (childProps.children) {
-        actionChildren = [childProps.children];
-      } else {
-        actionChildren = [];
-      }
-
-      for (const actionChild of actionChildren) {
-        if (!actionChild || typeof actionChild !== "object") {
-          continue;
-        }
-
-        const typedActionChild = actionChild as Record<string, unknown>;
-        const actionChildType = typedActionChild.type;
-        const actionChildProps =
-          (typedActionChild.props as Record<string, unknown>) || {};
-
-        if (actionChildType === "Button") {
-          const actionId =
-            (actionChildProps.id as string) ||
-            (actionChildProps.actionId as string);
-          const actionValue = actionChildProps.value as string;
-
-          if (!actionId) {
-            continue;
-          }
-
-          const label = (actionChildProps.children as string) || actionId;
-
-          footerContents.push({
-            action: {
-              data: serializePostbackData(actionId, actionValue),
-              displayText: String(label).slice(0, 300),
-              label: String(label).slice(0, 20),
-              type: "postback",
-            },
-            style:
-              actionChildProps.style === "primary" ? "primary" : "secondary",
-            type: "button",
-          });
-        }
+      const flexButton = buildFooterButton(actionChild);
+      if (flexButton) {
+        buttons.push(flexButton);
       }
     }
   }
 
+  return buttons;
+};
+
+/**
+ * Converts a Chat SDK CardElement into a LINE Flex Message payload.
+ *
+ * The card title, text, and section children become the bubble body;
+ * buttons inside actions become the bubble footer as postback actions.
+ */
+export const buildFlexMessage = (
+  card: CardElement
+): messagingApi.FlexMessage => {
+  const bodyContents = buildBodyContents(card);
+  const footerContents = buildFooterContents(card);
+
   if (bodyContents.length === 0) {
-    bodyContents.push({
-      text: "Empty Card",
-      type: "text",
-      wrap: true,
-    });
+    bodyContents.push(toFlexText("Empty Card"));
   }
 
   const bubble: messagingApi.FlexBubble = {
@@ -209,7 +165,7 @@ export const buildFlexMessage = (card: unknown): messagingApi.FlexMessage => {
   }
 
   return {
-    altText: (props.title as string) || "Flex Message",
+    altText: card.title || "Flex Message",
     contents: bubble,
     type: "flex",
   };

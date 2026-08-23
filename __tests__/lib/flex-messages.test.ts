@@ -1,10 +1,11 @@
 import { ValidationError } from "@chat-adapter/shared";
+import type { CardElement } from "chat";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildFlexMessage,
-  serializePostbackData,
   deserializePostbackData,
+  serializePostbackData,
 } from "../../src/lib/flex-messages.js";
 
 describe("Flex Messages Utility", () => {
@@ -46,35 +47,24 @@ describe("Flex Messages Utility", () => {
 
   describe("buildFlexMessage", () => {
     it("should convert a basic Card to Flex Message", () => {
-      const card: unknown = {
-        props: {
-          children: [
-            {
-              props: {
-                children: "Hello World",
+      const card: CardElement = {
+        children: [
+          { content: "Hello World", type: "text" },
+          {
+            children: [
+              {
+                id: "btn-1",
+                label: "Click Me",
+                style: "primary",
+                type: "button",
+                value: "val-1",
               },
-              type: "CardText",
-            },
-            {
-              props: {
-                children: [
-                  {
-                    props: {
-                      children: "Click Me",
-                      id: "btn-1",
-                      style: "primary",
-                      value: "val-1",
-                    },
-                    type: "Button",
-                  },
-                ],
-              },
-              type: "Actions",
-            },
-          ],
-          title: "My Title",
-        },
-        type: "Card",
+            ],
+            type: "actions",
+          },
+        ],
+        title: "My Title",
+        type: "card",
       };
 
       const flexMessage = buildFlexMessage(card);

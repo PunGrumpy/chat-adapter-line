@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 
 import {
+  AdapterRateLimitError,
   extractCard,
   extractFiles,
   PermissionError,
@@ -149,6 +150,32 @@ const isReplyTokenError = (error: unknown): boolean =>
   error.status === 400 &&
   parseLineErrorMessage(error.body) === "Invalid reply token";
 
+const RATE_LIMIT_STATUS = 429;
+
+/**
+ * A LINE 429 means the request was not processed, so rethrowing it as the
+ * Chat SDK's {@link AdapterRateLimitError} (with the `Retry-After` seconds
+ * when LINE provides the header) lets callers back off — and can never
+ * double-send.
+ */
+const throwIfRateLimited = (error: unknown): void => {
+  if (
+    !(error instanceof HTTPFetchError) ||
+    error.status !== RATE_LIMIT_STATUS
+  ) {
+    return;
+  }
+  const raw = error.headers?.get("retry-after") ?? null;
+  const parsed = raw === null ? Number.NaN : Number.parseInt(raw, 10);
+  throw new AdapterRateLimitError(
+    "line",
+    Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+  );
+};
+
+/** LINE's webhook-URL verification probes carry an all-zero dummy token. */
+const DUMMY_REPLY_TOKEN_PATTERN = /^0+$/;
+
 const extractStreamText = (chunk: string | StreamChunk): string => {
   if (typeof chunk === "string") {
     return chunk;
@@ -279,7 +306,13 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
       const threadId = encodeThreadId(event.source.type, channelId, sourceId);
 
-      this.replyTokens.set(threadId, event.replyToken);
+      // Reply tokens are single-use and short-lived; the first send for this
+      // thread can use the free Reply API instead of metered push. LINE's
+      // webhook-URL verification probes carry an all-zero dummy token that
+      // must never be spent on a real reply.
+      if (!DUMMY_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
+        this.replyTokens.set(threadId, event.replyToken);
+      }
 
       try {
         if (event.type === "postback") {
@@ -459,10 +492,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     const replyToken = this.replyTokens.take(threadId);
 
     if (!replyToken) {
-      return this.client.pushMessage({
-        messages,
-        to: sourceId,
-      });
+      return this.pushMessages(sourceId, messages);
     }
 
     try {
@@ -473,6 +503,10 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       this.logger.debug("Sent via reply API", { threadId });
       return result;
     } catch (error) {
+      // Rate limited: do not fall back to push — the throttle applies to the
+      // channel as a whole, so a push would burn quota just to 429 again.
+      throwIfRateLimited(error);
+
       if (!isReplyTokenError(error)) {
         throw error;
       }
@@ -482,10 +516,23 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         threadId,
       });
 
-      return this.client.pushMessage({
+      return this.pushMessages(sourceId, messages);
+    }
+  }
+
+  /** Push with LINE 429s mapped to the Chat SDK's rate-limit error. */
+  private async pushMessages(
+    sourceId: string,
+    messages: messagingApi.Message[]
+  ): Promise<{ sentMessages?: { id: string }[] }> {
+    try {
+      return await this.client.pushMessage({
         messages,
         to: sourceId,
       });
+    } catch (error) {
+      throwIfRateLimited(error);
+      throw error;
     }
   }
 

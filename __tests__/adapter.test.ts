@@ -1,7 +1,11 @@
 /* eslint-disable max-classes-per-file */
 import crypto from "node:crypto";
 
-import { PermissionError, ValidationError } from "@chat-adapter/shared";
+import {
+  AdapterRateLimitError,
+  PermissionError,
+  ValidationError,
+} from "@chat-adapter/shared";
 import {
   afterEach,
   beforeEach,
@@ -28,12 +32,19 @@ vi.mock("@line/bot-sdk", () => {
   class HTTPFetchError extends Error {
     status: number;
     body: string;
+    headers: Headers;
 
-    constructor(message: string, status: number, body: string) {
+    constructor(
+      message: string,
+      status: number,
+      body: string,
+      headers?: Headers
+    ) {
       super(message);
       this.name = "HTTPFetchError";
       this.status = status;
       this.body = body;
+      this.headers = headers ?? new Headers();
     }
   }
 
@@ -233,6 +244,22 @@ const makeReplyTokenError = (): Error => {
   ) as Error;
 };
 
+const makeRateLimitError = (retryAfterSeconds?: number): Error => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { HTTPFetchError } = (globalThis as any).__lineMocks;
+  const headers =
+    retryAfterSeconds === undefined
+      ? new Headers()
+      : new Headers({ "retry-after": String(retryAfterSeconds) });
+  return new HTTPFetchError(
+    "429 - Too Many Requests",
+    429,
+    "",
+    headers
+  ) as Error;
+};
+
+/** Delivers a webhook event to seed the reply-token store for a thread. */
 const seedReplyToken = async (
   adapter: LineAdapter,
   overrides: Partial<LineMessageEvent> = {}
@@ -963,6 +990,52 @@ describe("LineAdapter", () => {
         messages: [{ text: "Hello", type: "text" }],
         replyToken: "postback-reply-token",
       });
+    });
+
+    it("ignores LINE's all-zero verification dummy tokens", async () => {
+      await seedReplyToken(adapter, {
+        replyToken: "00000000000000000000000000000000",
+        webhookEventId: "evt-verify",
+      });
+
+      await adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+      expect(mocks.pushMessage).toHaveBeenCalledOnce();
+    });
+
+    it("maps a 429 push to AdapterRateLimitError with Retry-After", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(makeRateLimitError(30));
+
+      const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
+      await expect(promise).rejects.toMatchObject({ retryAfter: 30 });
+    });
+
+    it("maps a 429 without Retry-After to an unbounded rate-limit error", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(makeRateLimitError());
+
+      const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
+      await expect(promise).rejects.toMatchObject({ retryAfter: undefined });
+    });
+
+    it("does not fall back to push when the reply attempt is rate limited", async () => {
+      await seedReplyToken(adapter, {
+        replyToken: "fresh-reply-token",
+        webhookEventId: "evt-seed-429",
+      });
+      mocks.replyMessage.mockRejectedValueOnce(makeRateLimitError(7));
+
+      // The whole channel is throttled — a push would burn quota just to
+      // 429 again, so the rate limit propagates instead.
+      const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
+      await expect(promise).rejects.toMatchObject({ retryAfter: 7 });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
     });
   });
 

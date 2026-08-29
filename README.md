@@ -49,7 +49,7 @@ const adapter = createLineAdapter({
 
 ### Reply-token-first sending
 
-LINE bills the two send APIs differently. The Reply API is free. The Push API counts against the channel's monthly message quota, 200 to 500 messages on the free and lite plans.
+LINE bills the two send APIs differently. The Reply API is free. The Push API counts against the channel's monthly message quota, whose size varies by plan and country or region.
 
 When your bot answers an inbound message, the adapter sends that first reply through the Reply API. Every other send falls back to the Push API, because a reply token works once and expires within a minute. You don't configure anything. The adapter's API stays the same; only the transport underneath changes.
 

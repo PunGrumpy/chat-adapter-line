@@ -56,20 +56,20 @@ describe("ReplyTokenStore", () => {
     expect(store.take("thread-1")).toBeUndefined();
   });
 
-  it("expires tokens after the TTL", () => {
-    const store = new ReplyTokenStore(60_000);
+  it("expires tokens after the configured TTL", () => {
+    const store = new ReplyTokenStore(55_000);
     store.set("thread-1", "token-1");
 
-    vi.advanceTimersByTime(60_001);
+    vi.advanceTimersByTime(55_001);
 
     expect(store.take("thread-1")).toBeUndefined();
   });
 
   it("returns the token before the TTL elapses", () => {
-    const store = new ReplyTokenStore(60_000);
+    const store = new ReplyTokenStore(55_000);
     store.set("thread-1", "token-1");
 
-    vi.advanceTimersByTime(59_999);
+    vi.advanceTimersByTime(54_999);
 
     expect(store.take("thread-1")).toBe("token-1");
   });

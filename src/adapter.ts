@@ -122,10 +122,8 @@ const getMimeType = (type: string): string => {
 };
 
 /**
- * Reply tokens are single-use and expire quickly, so a stored token can be
- * rejected even though it looked fresh. LINE reports this as HTTP 400 by
- * raising {@link HTTPFetchError} from the bot SDK. Retrying once via push
- * is safe in that case.
+ * LINE reports an expired or already used reply token as HTTP 400. Only that
+ * case falls back to push; other Reply API errors stay visible to the caller.
  */
 const isReplyTokenError = (error: unknown): boolean =>
   error instanceof HTTPFetchError && error.status === 400;
@@ -260,8 +258,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
       const threadId = encodeThreadId(event.source.type, channelId, sourceId);
 
-      // Reply tokens are single-use and short-lived; the first send for this
-      // thread can use the free Reply API instead of metered push.
       this.replyTokens.set(threadId, event.replyToken);
 
       try {

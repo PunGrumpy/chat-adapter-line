@@ -227,7 +227,6 @@ const makeReplyTokenError = (): Error => {
   return new HTTPFetchError("400 - Bad Request", 400) as Error;
 };
 
-/** Delivers a webhook event to seed the reply-token store for a thread. */
 const seedReplyToken = async (
   adapter: LineAdapter,
   overrides: Partial<LineMessageEvent> = {}

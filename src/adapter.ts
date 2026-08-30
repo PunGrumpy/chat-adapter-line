@@ -150,31 +150,30 @@ const isReplyTokenError = (error: unknown): boolean =>
   error.status === 400 &&
   parseLineErrorMessage(error.body) === "Invalid reply token";
 
-const RATE_LIMIT_STATUS = 429;
-
 /**
- * A LINE 429 means the request was not processed, so rethrowing it as the
+ * A LINE 429 means the request was not processed, so mapping it to the
  * Chat SDK's {@link AdapterRateLimitError} (with the `Retry-After` seconds
- * when LINE provides the header) lets callers back off — and can never
- * double-send.
+ * when LINE provides the header) lets callers back off and can never
+ * double-send. Returns `undefined` for every other error.
  */
-const throwIfRateLimited = (error: unknown): void => {
-  if (
-    !(error instanceof HTTPFetchError) ||
-    error.status !== RATE_LIMIT_STATUS
-  ) {
-    return;
+const toRateLimitError = (
+  error: unknown
+): AdapterRateLimitError | undefined => {
+  if (!(error instanceof HTTPFetchError) || error.status !== 429) {
+    return undefined;
   }
-  const raw = error.headers?.get("retry-after") ?? null;
-  const parsed = raw === null ? Number.NaN : Number.parseInt(raw, 10);
-  throw new AdapterRateLimitError(
+  const retryAfter = Number.parseInt(
+    error.headers.get("retry-after") ?? "",
+    10
+  );
+  return new AdapterRateLimitError(
     "line",
-    Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+    retryAfter >= 0 ? retryAfter : undefined
   );
 };
 
-/** LINE's webhook-URL verification probes carry an all-zero dummy token. */
-const DUMMY_REPLY_TOKEN_PATTERN = /^0+$/;
+/** LINE's webhook-URL verification probes carry an all-zero or all-"f" dummy reply token. */
+const DUMMY_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
 
 const extractStreamText = (chunk: string | StreamChunk): string => {
   if (typeof chunk === "string") {
@@ -232,10 +231,15 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     this.logger = chat.getLogger("line");
 
     try {
-      const botInfo = await this.client.getBotInfo();
+      const botInfo = await this.callLine(() => this.client.getBotInfo());
       this.channelId = botInfo.userId;
       this.logger.info("LINE adapter initialized", { botId: botInfo.userId });
     } catch (error) {
+      // A rate-limited init is retryable; pinning channelId to "unknown"
+      // would corrupt every thread ID for the process lifetime instead.
+      if (error instanceof AdapterRateLimitError) {
+        throw error;
+      }
       this.logger.error("Failed to fetch bot info", { error });
       this.channelId = "unknown";
     }
@@ -298,6 +302,11 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       if (event.deliveryContext?.isRedelivery) {
         continue;
       }
+      // Webhook-URL verification events are synthetic. Replying to LINE's
+      // fake user fails, so drop them before they reach any handler.
+      if (DUMMY_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
+        continue;
+      }
 
       const sourceId = getSourceIdFromEvent(event);
       if (!sourceId) {
@@ -307,12 +316,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       const threadId = encodeThreadId(event.source.type, channelId, sourceId);
 
       // Reply tokens are single-use and short-lived; the first send for this
-      // thread can use the free Reply API instead of metered push. LINE's
-      // webhook-URL verification probes carry an all-zero dummy token that
-      // must never be spent on a real reply.
-      if (!DUMMY_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
-        this.replyTokens.set(threadId, event.replyToken);
-      }
+      // thread can use the free Reply API instead of metered push.
+      this.replyTokens.set(threadId, event.replyToken);
 
       try {
         if (event.type === "postback") {
@@ -411,7 +416,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       const messageId = raw.message.id;
       attachments.push({
         fetchData: async () => {
-          const stream = await this.client.getMessageContent(messageId);
+          const stream = await this.callLine(() =>
+            this.client.getMessageContent(messageId)
+          );
           return readableToBuffer(stream);
         },
         mimeType: getMimeType(raw.message.type),
@@ -503,9 +510,14 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       this.logger.debug("Sent via reply API", { threadId });
       return result;
     } catch (error) {
-      // Rate limited: do not fall back to push — the throttle applies to the
-      // channel as a whole, so a push would burn quota just to 429 again.
-      throwIfRateLimited(error);
+      // A 429 means LINE never processed the request. Restore the still-valid
+      // token for the retry, and don't fall back to push, since the throttle
+      // applies to the whole channel and a push would just 429 again.
+      const rateLimit = toRateLimitError(error);
+      if (rateLimit) {
+        this.replyTokens.set(threadId, replyToken);
+        throw rateLimit;
+      }
 
       if (!isReplyTokenError(error)) {
         throw error;
@@ -521,18 +533,24 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   }
 
   /** Push with LINE 429s mapped to the Chat SDK's rate-limit error. */
-  private async pushMessages(
+  private pushMessages(
     sourceId: string,
     messages: messagingApi.Message[]
   ): Promise<{ sentMessages?: { id: string }[] }> {
-    try {
-      return await this.client.pushMessage({
+    return this.callLine(() =>
+      this.client.pushMessage({
         messages,
         to: sourceId,
-      });
+      })
+    );
+  }
+
+  /** Runs a LINE API call, mapping 429s to the Chat SDK's rate-limit error. */
+  private async callLine<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
     } catch (error) {
-      throwIfRateLimited(error);
-      throw error;
+      throw toRateLimitError(error) ?? error;
     }
   }
 
@@ -697,7 +715,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     sourceId: string
   ): Promise<ThreadInfo> {
     try {
-      const profile = await this.client.getProfile(sourceId);
+      const profile = await this.callLine(() =>
+        this.client.getProfile(sourceId)
+      );
       return {
         channelId,
         channelName: undefined,
@@ -705,7 +725,11 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         isDM: true,
         metadata: { displayName: profile.displayName },
       };
-    } catch {
+    } catch (error) {
+      // Rate limits are retryable; don't cache a degraded ThreadInfo.
+      if (error instanceof AdapterRateLimitError) {
+        throw error;
+      }
       return {
         channelId,
         channelName: undefined,
@@ -722,7 +746,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     sourceId: string
   ): Promise<ThreadInfo> {
     try {
-      const summary = await this.client.getGroupSummary(sourceId);
+      const summary = await this.callLine(() =>
+        this.client.getGroupSummary(sourceId)
+      );
       return {
         channelId,
         channelName: summary.groupName,
@@ -730,7 +756,11 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         isDM: false,
         metadata: { groupName: summary.groupName },
       };
-    } catch {
+    } catch (error) {
+      // Rate limits are retryable; don't cache a degraded ThreadInfo.
+      if (error instanceof AdapterRateLimitError) {
+        throw error;
+      }
       return {
         channelId,
         channelName: undefined,

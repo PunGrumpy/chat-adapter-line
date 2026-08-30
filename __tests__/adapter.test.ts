@@ -998,6 +998,8 @@ describe("LineAdapter", () => {
         webhookEventId: "evt-verify",
       });
 
+      expect(mockChat.processMessage).not.toHaveBeenCalled();
+
       await adapter.postMessage("line:bot-123:user:u-123", "Hello");
 
       expect(mocks.replyMessage).not.toHaveBeenCalled();
@@ -1029,8 +1031,6 @@ describe("LineAdapter", () => {
       });
       mocks.replyMessage.mockRejectedValueOnce(makeRateLimitError(7));
 
-      // The whole channel is throttled — a push would burn quota just to
-      // 429 again, so the rate limit propagates instead.
       const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
 
       await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);

@@ -153,10 +153,8 @@ const isReplyTokenError = (error: unknown): boolean =>
 const RATE_LIMIT_STATUS = 429;
 
 /**
- * A LINE 429 means the request was not processed, so rethrowing it as the
- * Chat SDK's {@link AdapterRateLimitError} (with the `Retry-After` seconds
- * when LINE provides the header) lets callers back off — and can never
- * double-send.
+ * LINE did not process a 429 response, so callers can safely retry after the
+ * delay reported in `Retry-After`.
  */
 const throwIfRateLimited = (error: unknown): void => {
   if (
@@ -173,7 +171,7 @@ const throwIfRateLimited = (error: unknown): void => {
   );
 };
 
-/** LINE's webhook-URL verification probes carry an all-zero dummy token. */
+/** LINE's webhook-URL verification probes use a dummy token. */
 const DUMMY_REPLY_TOKEN_PATTERN = /^0+$/;
 
 const extractStreamText = (chunk: string | StreamChunk): string => {
@@ -306,13 +304,11 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
       const threadId = encodeThreadId(event.source.type, channelId, sourceId);
 
-      // Reply tokens are single-use and short-lived; the first send for this
-      // thread can use the free Reply API instead of metered push. LINE's
-      // webhook-URL verification probes carry an all-zero dummy token that
-      // must never be spent on a real reply.
-      if (!DUMMY_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
-        this.replyTokens.set(threadId, event.replyToken);
+      if (DUMMY_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
+        continue;
       }
+
+      this.replyTokens.set(threadId, event.replyToken);
 
       try {
         if (event.type === "postback") {
@@ -503,8 +499,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       this.logger.debug("Sent via reply API", { threadId });
       return result;
     } catch (error) {
-      // Rate limited: do not fall back to push — the throttle applies to the
-      // channel as a whole, so a push would burn quota just to 429 again.
       throwIfRateLimited(error);
 
       if (!isReplyTokenError(error)) {

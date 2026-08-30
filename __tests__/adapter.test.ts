@@ -247,10 +247,11 @@ const makeReplyTokenError = (): Error => {
 const makeRateLimitError = (retryAfterSeconds?: number): Error => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { HTTPFetchError } = (globalThis as any).__lineMocks;
-  const headers =
+  const headers = new Headers(
     retryAfterSeconds === undefined
-      ? new Headers()
-      : new Headers({ "retry-after": String(retryAfterSeconds) });
+      ? undefined
+      : { "retry-after": String(retryAfterSeconds) }
+  );
   return new HTTPFetchError(
     "429 - Too Many Requests",
     429,
@@ -375,6 +376,22 @@ describe("LineAdapter", () => {
       expect(adapter.channelIdFromThreadId("line:unknown:user:u-1")).toBe(
         "unknown"
       );
+    });
+
+    it("rethrows a 429 instead of pinning channelId to unknown", async () => {
+      mocks.getBotInfo.mockRejectedValue(makeRateLimitError(10));
+      const mockChat = {
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+      };
+
+      await expect(
+        adapter.initialize(mockChat as never)
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
     });
   });
 
@@ -992,9 +1009,12 @@ describe("LineAdapter", () => {
       });
     });
 
-    it("ignores LINE's all-zero verification dummy tokens", async () => {
+    it.each([
+      ["all-zero", "00000000000000000000000000000000"],
+      ["all-f", "ffffffffffffffffffffffffffffffff"],
+    ])("skips LINE's %s verification dummy events", async (_label, token) => {
       await seedReplyToken(adapter, {
-        replyToken: "00000000000000000000000000000000",
+        replyToken: token,
         webhookEventId: "evt-verify",
       });
 
@@ -1006,23 +1026,24 @@ describe("LineAdapter", () => {
       expect(mocks.pushMessage).toHaveBeenCalledOnce();
     });
 
-    it("maps a 429 push to AdapterRateLimitError with Retry-After", async () => {
-      mocks.pushMessage.mockRejectedValueOnce(makeRateLimitError(30));
+    it.each([
+      ["with Retry-After", 30, 30],
+      ["without Retry-After", undefined, undefined],
+    ])(
+      "maps a 429 push %s to AdapterRateLimitError",
+      async (_label, retryAfterHeader, expectedRetryAfter) => {
+        mocks.pushMessage.mockRejectedValueOnce(
+          makeRateLimitError(retryAfterHeader)
+        );
 
-      const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
+        const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
 
-      await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
-      await expect(promise).rejects.toMatchObject({ retryAfter: 30 });
-    });
-
-    it("maps a 429 without Retry-After to an unbounded rate-limit error", async () => {
-      mocks.pushMessage.mockRejectedValueOnce(makeRateLimitError());
-
-      const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
-
-      await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
-      await expect(promise).rejects.toMatchObject({ retryAfter: undefined });
-    });
+        await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
+        await expect(promise).rejects.toMatchObject({
+          retryAfter: expectedRetryAfter,
+        });
+      }
+    );
 
     it("does not fall back to push when the reply attempt is rate limited", async () => {
       await seedReplyToken(adapter, {
@@ -1035,6 +1056,26 @@ describe("LineAdapter", () => {
 
       await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
       await expect(promise).rejects.toMatchObject({ retryAfter: 7 });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("keeps the reply token when the reply attempt is rate limited", async () => {
+      await seedReplyToken(adapter, {
+        replyToken: "fresh-reply-token",
+        webhookEventId: "evt-seed-keep",
+      });
+      mocks.replyMessage.mockRejectedValueOnce(makeRateLimitError(7));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", "Hello")
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
+
+      await adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      expect(mocks.replyMessage).toHaveBeenLastCalledWith({
+        messages: [{ text: "Hello", type: "text" }],
+        replyToken: "fresh-reply-token",
+      });
       expect(mocks.pushMessage).not.toHaveBeenCalled();
     });
   });
@@ -1212,6 +1253,27 @@ describe("LineAdapter", () => {
 
       expect(result.isDM).toBe(false);
       expect(result.channelName).toBeUndefined();
+    });
+
+    it("rethrows a 429 instead of caching a degraded user thread", async () => {
+      mocks.getProfile.mockRejectedValueOnce(makeRateLimitError(5));
+
+      await expect(
+        adapter.fetchThread("line:bot-123:user:u-429")
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
+
+      mocks.getProfile.mockResolvedValue({ displayName: "John Doe" });
+      const result = await adapter.fetchThread("line:bot-123:user:u-429");
+
+      expect(result.metadata).toEqual({ displayName: "John Doe" });
+    });
+
+    it("rethrows a 429 instead of caching a degraded group thread", async () => {
+      mocks.getGroupSummary.mockRejectedValueOnce(makeRateLimitError(5));
+
+      await expect(
+        adapter.fetchThread("line:bot-123:group:g-429")
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
     });
 
     it("handles room thread without API call", async () => {

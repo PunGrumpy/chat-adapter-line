@@ -150,29 +150,25 @@ const isReplyTokenError = (error: unknown): boolean =>
   error.status === 400 &&
   parseLineErrorMessage(error.body) === "Invalid reply token";
 
-const RATE_LIMIT_STATUS = 429;
-
-/**
- * LINE did not process a 429 response, so callers can safely retry after the
- * delay reported in `Retry-After`.
- */
-const throwIfRateLimited = (error: unknown): void => {
-  if (
-    !(error instanceof HTTPFetchError) ||
-    error.status !== RATE_LIMIT_STATUS
-  ) {
-    return;
+/** Converts a LINE 429 to the Chat SDK's rate-limit error. */
+const toRateLimitError = (
+  error: unknown
+): AdapterRateLimitError | undefined => {
+  if (!(error instanceof HTTPFetchError) || error.status !== 429) {
+    return undefined;
   }
-  const raw = error.headers?.get("retry-after") ?? null;
-  const parsed = raw === null ? Number.NaN : Number.parseInt(raw, 10);
-  throw new AdapterRateLimitError(
+  const retryAfter = Number.parseInt(
+    error.headers.get("retry-after") ?? "",
+    10
+  );
+  return new AdapterRateLimitError(
     "line",
-    Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+    retryAfter >= 0 ? retryAfter : undefined
   );
 };
 
-/** LINE's webhook-URL verification probes use a dummy token. */
-const DUMMY_REPLY_TOKEN_PATTERN = /^0+$/;
+/** LINE's webhook URL verification probes use a dummy token. */
+const DUMMY_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
 
 const extractStreamText = (chunk: string | StreamChunk): string => {
   if (typeof chunk === "string") {
@@ -230,10 +226,13 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     this.logger = chat.getLogger("line");
 
     try {
-      const botInfo = await this.client.getBotInfo();
+      const botInfo = await this.callLine(() => this.client.getBotInfo());
       this.channelId = botInfo.userId;
       this.logger.info("LINE adapter initialized", { botId: botInfo.userId });
     } catch (error) {
+      if (error instanceof AdapterRateLimitError) {
+        throw error;
+      }
       this.logger.error("Failed to fetch bot info", { error });
       this.channelId = "unknown";
     }
@@ -296,6 +295,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       if (event.deliveryContext?.isRedelivery) {
         continue;
       }
+      if (DUMMY_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
+        continue;
+      }
 
       const sourceId = getSourceIdFromEvent(event);
       if (!sourceId) {
@@ -303,10 +305,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       }
 
       const threadId = encodeThreadId(event.source.type, channelId, sourceId);
-
-      if (DUMMY_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
-        continue;
-      }
 
       this.replyTokens.set(threadId, event.replyToken);
 
@@ -407,7 +405,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       const messageId = raw.message.id;
       attachments.push({
         fetchData: async () => {
-          const stream = await this.client.getMessageContent(messageId);
+          const stream = await this.callLine(() =>
+            this.client.getMessageContent(messageId)
+          );
           return readableToBuffer(stream);
         },
         mimeType: getMimeType(raw.message.type),
@@ -499,7 +499,11 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       this.logger.debug("Sent via reply API", { threadId });
       return result;
     } catch (error) {
-      throwIfRateLimited(error);
+      const rateLimit = toRateLimitError(error);
+      if (rateLimit) {
+        this.replyTokens.set(threadId, replyToken);
+        throw rateLimit;
+      }
 
       if (!isReplyTokenError(error)) {
         throw error;
@@ -515,18 +519,23 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   }
 
   /** Push with LINE 429s mapped to the Chat SDK's rate-limit error. */
-  private async pushMessages(
+  private pushMessages(
     sourceId: string,
     messages: messagingApi.Message[]
   ): Promise<{ sentMessages?: { id: string }[] }> {
-    try {
-      return await this.client.pushMessage({
+    return this.callLine(() =>
+      this.client.pushMessage({
         messages,
         to: sourceId,
-      });
+      })
+    );
+  }
+
+  private async callLine<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
     } catch (error) {
-      throwIfRateLimited(error);
-      throw error;
+      throw toRateLimitError(error) ?? error;
     }
   }
 
@@ -691,7 +700,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     sourceId: string
   ): Promise<ThreadInfo> {
     try {
-      const profile = await this.client.getProfile(sourceId);
+      const profile = await this.callLine(() =>
+        this.client.getProfile(sourceId)
+      );
       return {
         channelId,
         channelName: undefined,
@@ -699,7 +710,10 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         isDM: true,
         metadata: { displayName: profile.displayName },
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof AdapterRateLimitError) {
+        throw error;
+      }
       return {
         channelId,
         channelName: undefined,
@@ -716,7 +730,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     sourceId: string
   ): Promise<ThreadInfo> {
     try {
-      const summary = await this.client.getGroupSummary(sourceId);
+      const summary = await this.callLine(() =>
+        this.client.getGroupSummary(sourceId)
+      );
       return {
         channelId,
         channelName: summary.groupName,
@@ -724,7 +740,10 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         isDM: false,
         metadata: { groupName: summary.groupName },
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof AdapterRateLimitError) {
+        throw error;
+      }
       return {
         channelId,
         channelName: undefined,

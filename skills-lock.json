@@ -1,10 +1,17 @@
 {
   "version": 1,
   "skills": {
+    "add-adapter": {
+      "source": "vercel/chat",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/add-adapter/SKILL.md",
+      "computedHash": "e1656598317fec29de630bb560ed8508eb6cba81e7a1bce838071567f7ad6085"
+    },
     "chat-sdk": {
       "source": "vercel/chat",
       "sourceType": "github",
-      "computedHash": "7d51cdee8fee69b15bf37d7dc3a61315bf5e8063933ec6b299a86226af16f7fa"
+      "skillPath": "skills/chat/SKILL.md",
+      "computedHash": "dd2e9e18aa536e4f2625a6830247e4f593ba0c65ba7527365c18375c2cc618bd"
     }
   }
 }

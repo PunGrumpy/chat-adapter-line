@@ -27,11 +27,13 @@ vi.mock("@line/bot-sdk", () => {
 
   class HTTPFetchError extends Error {
     status: number;
+    body: string;
 
-    constructor(message: string, status: number) {
+    constructor(message: string, status: number, body: string) {
       super(message);
       this.name = "HTTPFetchError";
       this.status = status;
+      this.body = body;
     }
   }
 
@@ -224,7 +226,11 @@ const createNonTextChunk = async function* createNonTextChunkGen<T>(
 const makeReplyTokenError = (): Error => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { HTTPFetchError } = (globalThis as any).__lineMocks;
-  return new HTTPFetchError("400 - Bad Request", 400) as Error;
+  return new HTTPFetchError(
+    "400 - Bad Request",
+    400,
+    JSON.stringify({ message: "Invalid reply token" })
+  ) as Error;
 };
 
 const seedReplyToken = async (
@@ -882,17 +888,21 @@ describe("LineAdapter", () => {
       expect(result.id).toBe("pushed-1");
     });
 
-    it("does not retry push when reply fails for another reason", async () => {
+    it("does not retry push when a 400 has another error message", async () => {
       await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { HTTPFetchError } = (globalThis as any).__lineMocks;
       mocks.replyMessage.mockRejectedValueOnce(
-        new HTTPFetchError("500 - Internal Server Error", 500)
+        new HTTPFetchError(
+          "400 - Bad Request",
+          400,
+          JSON.stringify({ message: "The request body has 2 error(s)" })
+        )
       );
 
       await expect(
         adapter.postMessage("line:bot-123:user:u-123", "Hello")
-      ).rejects.toThrow("500");
+      ).rejects.toThrow("400");
 
       expect(mocks.pushMessage).not.toHaveBeenCalled();
     });

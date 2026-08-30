@@ -123,10 +123,31 @@ const getMimeType = (type: string): string => {
 
 /**
  * LINE reports an expired or already used reply token as HTTP 400. Only that
- * case falls back to push; other Reply API errors stay visible to the caller.
+ * case falls back to push, because a 400 caused by the request payload did
+ * not consume the reply token and may have already sent messages.
  */
+const parseLineErrorMessage = (body: string): string | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "message" in parsed &&
+      typeof parsed.message === "string"
+    ) {
+      return parsed.message;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+};
+
 const isReplyTokenError = (error: unknown): boolean =>
-  error instanceof HTTPFetchError && error.status === 400;
+  error instanceof HTTPFetchError &&
+  error.status === 400 &&
+  parseLineErrorMessage(error.body) === "Invalid reply token";
 
 const extractStreamText = (chunk: string | StreamChunk): string => {
   if (typeof chunk === "string") {

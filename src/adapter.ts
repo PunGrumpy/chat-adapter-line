@@ -7,7 +7,7 @@ import {
   PermissionError,
   ValidationError,
 } from "@chat-adapter/shared";
-import { LineBotClient } from "@line/bot-sdk";
+import { HTTPFetchError, LineBotClient } from "@line/bot-sdk";
 import type { messagingApi } from "@line/bot-sdk";
 import type {
   Adapter,
@@ -40,6 +40,7 @@ import {
   buildFlexMessage,
   deserializePostbackData,
 } from "./lib/flex-messages.js";
+import { ReplyTokenStore } from "./lib/reply-token-store.js";
 import { decodeThreadId, encodeThreadId, isDM } from "./lib/thread-id.js";
 import { toPlainText } from "./lib/to-plain-text.js";
 import type {
@@ -120,6 +121,13 @@ const getMimeType = (type: string): string => {
   return "application/octet-stream";
 };
 
+/**
+ * LINE reports an expired or already used reply token as HTTP 400. Only that
+ * case falls back to push; other Reply API errors stay visible to the caller.
+ */
+const isReplyTokenError = (error: unknown): boolean =>
+  error instanceof HTTPFetchError && error.status === 400;
+
 const extractStreamText = (chunk: string | StreamChunk): string => {
   if (typeof chunk === "string") {
     return chunk;
@@ -160,6 +168,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     { info: ThreadInfo; expires: number }
   >();
   private lastTypingTime = new Map<string, number>();
+  private replyTokens = new ReplyTokenStore();
 
   constructor(config: LineAdapterConfig) {
     this.client = LineBotClient.fromChannelAccessToken({
@@ -248,6 +257,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       }
 
       const threadId = encodeThreadId(event.source.type, channelId, sourceId);
+
+      this.replyTokens.set(threadId, event.replyToken);
 
       try {
         if (event.type === "postback") {
@@ -408,12 +419,53 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     const messagesToSend = lineMessages.slice(0, 5);
 
-    const result = await this.client.pushMessage({
-      messages: messagesToSend,
-      to: sourceId,
-    });
+    const result = await this.sendMessages(threadId, sourceId, messagesToSend);
 
     return this.buildRawMessage(result, "", threadId);
+  }
+
+  /**
+   * Sends messages via the free Reply API when a fresh webhook reply token is
+   * available for the thread. Uses the quota-metered Push API otherwise:
+   * proactive sends, late replies, tokens already consumed, or a reply
+   * rejected because the token expired or was used.
+   */
+  private async sendMessages(
+    threadId: string,
+    sourceId: string,
+    messages: messagingApi.Message[]
+  ): Promise<{ sentMessages?: { id: string }[] }> {
+    const replyToken = this.replyTokens.take(threadId);
+
+    if (!replyToken) {
+      return this.client.pushMessage({
+        messages,
+        to: sourceId,
+      });
+    }
+
+    try {
+      const result = await this.client.replyMessage({
+        messages,
+        replyToken,
+      });
+      this.logger.debug("Sent via reply API", { threadId });
+      return result;
+    } catch (error) {
+      if (!isReplyTokenError(error)) {
+        throw error;
+      }
+
+      this.logger.warn("Reply token rejected, falling back to push", {
+        error,
+        threadId,
+      });
+
+      return this.client.pushMessage({
+        messages,
+        to: sourceId,
+      });
+    }
   }
 
   async stream(
@@ -436,10 +488,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       buffer += text;
 
       if (buffer.length > 500 && sentCount < 5) {
-        const result = await this.client.pushMessage({
-          messages: [{ text: buffer, type: "text" }],
-          to: sourceId,
-        });
+        const result = await this.sendMessages(threadId, sourceId, [
+          { text: buffer, type: "text" },
+        ]);
         lastResult = this.buildRawMessage(result, buffer, threadId);
         sentCount += 1;
         buffer = "";
@@ -447,10 +498,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     }
 
     if (buffer && sentCount < 5) {
-      const result = await this.client.pushMessage({
-        messages: [{ text: buffer, type: "text" }],
-        to: sourceId,
-      });
+      const result = await this.sendMessages(threadId, sourceId, [
+        { text: buffer, type: "text" },
+      ]);
       lastResult = this.buildRawMessage(result, buffer, threadId);
     }
 

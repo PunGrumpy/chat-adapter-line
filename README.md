@@ -47,6 +47,12 @@ const adapter = createLineAdapter({
 });
 ```
 
+### Reply-token-first sending
+
+LINE does not bill Reply API calls, but each Push API call counts against the channel's monthly message quota. That quota varies by plan and by country or region.
+
+When your bot answers an inbound message, the adapter sends that first reply through the Reply API. Later sends use the Push API, because a reply token works once and expires within a minute. You don't need to change any adapter code.
+
 ## License
 
 [MIT](./LICENSE)

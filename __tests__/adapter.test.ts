@@ -18,11 +18,22 @@ import type { LineMessageEvent, LinePostbackEvent } from "../src/types.js";
 // Mock @line/bot-sdk - factory is self-contained
 vi.mock("@line/bot-sdk", () => {
   const pushMessage = vi.fn();
+  const replyMessage = vi.fn();
   const getBotInfo = vi.fn();
   const getProfile = vi.fn();
   const getGroupSummary = vi.fn();
   const acquireChatControl = vi.fn();
   const getMessageContent = vi.fn();
+
+  class HTTPFetchError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = "HTTPFetchError";
+      this.status = status;
+    }
+  }
 
   class MockLineBotClient {
     acquireChatControl = acquireChatControl;
@@ -31,21 +42,24 @@ vi.mock("@line/bot-sdk", () => {
     getMessageContent = getMessageContent;
     getProfile = getProfile;
     pushMessage = pushMessage;
+    replyMessage = replyMessage;
 
     static fromChannelAccessToken = vi.fn(() => new MockLineBotClient());
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).__lineMocks = {
+    HTTPFetchError,
     acquireChatControl,
     getBotInfo,
     getGroupSummary,
     getMessageContent,
     getProfile,
     pushMessage,
+    replyMessage,
   };
 
-  return { LineBotClient: MockLineBotClient };
+  return { HTTPFetchError, LineBotClient: MockLineBotClient };
 });
 
 // Mock chat - factory is self-contained
@@ -102,6 +116,7 @@ vi.mock("chat", async (importOriginal) => {
 
 interface Mocks {
   pushMessage: Mock;
+  replyMessage: Mock;
   getBotInfo: Mock;
   getProfile: Mock;
   getGroupSummary: Mock;
@@ -204,6 +219,27 @@ const createNonTextChunk = async function* createNonTextChunkGen<T>(
   chunk: T
 ): AsyncGenerator<T> {
   yield chunk;
+};
+
+const makeReplyTokenError = (): Error => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { HTTPFetchError } = (globalThis as any).__lineMocks;
+  return new HTTPFetchError("400 - Bad Request", 400) as Error;
+};
+
+const seedReplyToken = async (
+  adapter: LineAdapter,
+  overrides: Partial<LineMessageEvent> = {}
+): Promise<void> => {
+  const payload = {
+    destination: "ch-123",
+    events: [makeEvent(overrides)],
+  };
+  const body = JSON.stringify(payload);
+  const sig = generateSignature(body, validConfig.channelSecret);
+  const request = makeRequest(body, sig);
+
+  await adapter.handleWebhook(request);
 };
 
 describe("LineFormatConverter", () => {
@@ -756,6 +792,167 @@ describe("LineAdapter", () => {
 
       expect(result.id).toBe("sent-1");
       expect(result.threadId).toBe("line:bot-123:user:u-123");
+    });
+  });
+
+  describe("reply-first sending", () => {
+    let mockChat: {
+      processMessage: Mock;
+      processAction: Mock;
+      getLogger: Mock;
+    };
+
+    beforeEach(async () => {
+      mockChat = {
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+        processAction: vi.fn(),
+        processMessage: vi.fn(),
+      };
+
+      await adapter.initialize(mockChat as never);
+      mocks.pushMessage.mockResolvedValue({
+        sentMessages: [{ id: "pushed-1" }],
+      });
+      mocks.replyMessage.mockResolvedValue({
+        sentMessages: [{ id: "replied-1" }],
+      });
+    });
+
+    it("uses reply API when a webhook reply token is available", async () => {
+      await seedReplyToken(adapter, {
+        replyToken: "fresh-reply-token",
+        webhookEventId: "evt-seed",
+      });
+
+      const result = await adapter.postMessage(
+        "line:bot-123:user:u-123",
+        "Hello"
+      );
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Hello", type: "text" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(result.id).toBe("replied-1");
+    });
+
+    it("consumes the reply token after one send", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      await adapter.postMessage("line:bot-123:user:u-123", "first");
+      await adapter.postMessage("line:bot-123:user:u-123", "second");
+
+      expect(mocks.replyMessage).toHaveBeenCalledOnce();
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ text: "second", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("falls back to push when no reply token is stored", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Hello", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("falls back to push when the reply token is rejected", async () => {
+      await seedReplyToken(adapter, { replyToken: "stale-reply-token" });
+      mocks.replyMessage.mockRejectedValueOnce(makeReplyTokenError());
+
+      const result = await adapter.postMessage(
+        "line:bot-123:user:u-123",
+        "Hello"
+      );
+
+      expect(mocks.replyMessage).toHaveBeenCalledOnce();
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Hello", type: "text" }],
+        to: "u-123",
+      });
+      expect(result.id).toBe("pushed-1");
+    });
+
+    it("does not retry push when reply fails for another reason", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { HTTPFetchError } = (globalThis as any).__lineMocks;
+      mocks.replyMessage.mockRejectedValueOnce(
+        new HTTPFetchError("500 - Internal Server Error", 500)
+      );
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", "Hello")
+      ).rejects.toThrow("500");
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("keeps reply tokens scoped per thread", async () => {
+      await seedReplyToken(adapter, {
+        replyToken: "token-user-a",
+        source: { type: "user", userId: "u-a" },
+        webhookEventId: "evt-a",
+      });
+      await seedReplyToken(adapter, {
+        replyToken: "token-user-b",
+        source: { type: "user", userId: "u-b" },
+        webhookEventId: "evt-b",
+      });
+
+      await adapter.postMessage("line:bot-123:user:u-a", "Hello A");
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Hello A", type: "text" }],
+        replyToken: "token-user-a",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("streams the first message via reply API and the rest via push", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      await adapter.stream(
+        "line:bot-123:user:u-123",
+        createRepeatedChunks("a".repeat(501), 2)
+      );
+
+      expect(mocks.replyMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [{ text: "a".repeat(501), type: "text" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [{ text: "a".repeat(501), type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("seeds the reply token from postback events too", async () => {
+      const payload = {
+        destination: "ch-123",
+        events: [makePostbackEvent({ replyToken: "postback-reply-token" })],
+      };
+      const body = JSON.stringify(payload);
+      const sig = generateSignature(body, validConfig.channelSecret);
+      const request = makeRequest(body, sig);
+
+      await adapter.handleWebhook(request);
+
+      await adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Hello", type: "text" }],
+        replyToken: "postback-reply-token",
+      });
     });
   });
 

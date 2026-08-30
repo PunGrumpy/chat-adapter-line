@@ -1,7 +1,11 @@
 /* eslint-disable max-classes-per-file */
 import crypto from "node:crypto";
 
-import { PermissionError, ValidationError } from "@chat-adapter/shared";
+import {
+  AdapterRateLimitError,
+  PermissionError,
+  ValidationError,
+} from "@chat-adapter/shared";
 import {
   afterEach,
   beforeEach,
@@ -28,12 +32,19 @@ vi.mock("@line/bot-sdk", () => {
   class HTTPFetchError extends Error {
     status: number;
     body: string;
+    headers: Headers;
 
-    constructor(message: string, status: number, body: string) {
+    constructor(
+      message: string,
+      status: number,
+      body: string,
+      headers?: Headers
+    ) {
       super(message);
       this.name = "HTTPFetchError";
       this.status = status;
       this.body = body;
+      this.headers = headers ?? new Headers();
     }
   }
 
@@ -233,6 +244,23 @@ const makeReplyTokenError = (): Error => {
   ) as Error;
 };
 
+const makeRateLimitError = (retryAfterSeconds?: number): Error => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { HTTPFetchError } = (globalThis as any).__lineMocks;
+  const headers = new Headers(
+    retryAfterSeconds === undefined
+      ? undefined
+      : { "retry-after": String(retryAfterSeconds) }
+  );
+  return new HTTPFetchError(
+    "429 - Too Many Requests",
+    429,
+    "",
+    headers
+  ) as Error;
+};
+
+/** Delivers a webhook event to seed the reply-token store for a thread. */
 const seedReplyToken = async (
   adapter: LineAdapter,
   overrides: Partial<LineMessageEvent> = {}
@@ -348,6 +376,22 @@ describe("LineAdapter", () => {
       expect(adapter.channelIdFromThreadId("line:unknown:user:u-1")).toBe(
         "unknown"
       );
+    });
+
+    it("rethrows a 429 instead of pinning channelId to unknown", async () => {
+      mocks.getBotInfo.mockRejectedValue(makeRateLimitError(10));
+      const mockChat = {
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+      };
+
+      await expect(
+        adapter.initialize(mockChat as never)
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
     });
   });
 
@@ -964,6 +1008,76 @@ describe("LineAdapter", () => {
         replyToken: "postback-reply-token",
       });
     });
+
+    it.each([
+      ["all-zero", "00000000000000000000000000000000"],
+      ["all-f", "ffffffffffffffffffffffffffffffff"],
+    ])("skips LINE's %s verification dummy events", async (_label, token) => {
+      await seedReplyToken(adapter, {
+        replyToken: token,
+        webhookEventId: "evt-verify",
+      });
+
+      expect(mockChat.processMessage).not.toHaveBeenCalled();
+
+      await adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+      expect(mocks.pushMessage).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      ["with Retry-After", 30, 30],
+      ["without Retry-After", undefined, undefined],
+    ])(
+      "maps a 429 push %s to AdapterRateLimitError",
+      async (_label, retryAfterHeader, expectedRetryAfter) => {
+        mocks.pushMessage.mockRejectedValueOnce(
+          makeRateLimitError(retryAfterHeader)
+        );
+
+        const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+        await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
+        await expect(promise).rejects.toMatchObject({
+          retryAfter: expectedRetryAfter,
+        });
+      }
+    );
+
+    it("does not fall back to push when the reply attempt is rate limited", async () => {
+      await seedReplyToken(adapter, {
+        replyToken: "fresh-reply-token",
+        webhookEventId: "evt-seed-429",
+      });
+      mocks.replyMessage.mockRejectedValueOnce(makeRateLimitError(7));
+
+      const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
+      await expect(promise).rejects.toMatchObject({ retryAfter: 7 });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("keeps the reply token when the reply attempt is rate limited", async () => {
+      await seedReplyToken(adapter, {
+        replyToken: "fresh-reply-token",
+        webhookEventId: "evt-seed-keep",
+      });
+      mocks.replyMessage.mockRejectedValueOnce(makeRateLimitError(7));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", "Hello")
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
+
+      await adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      expect(mocks.replyMessage).toHaveBeenLastCalledWith({
+        messages: [{ text: "Hello", type: "text" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
   });
 
   describe("stream", () => {
@@ -1139,6 +1253,27 @@ describe("LineAdapter", () => {
 
       expect(result.isDM).toBe(false);
       expect(result.channelName).toBeUndefined();
+    });
+
+    it("rethrows a 429 instead of caching a degraded user thread", async () => {
+      mocks.getProfile.mockRejectedValueOnce(makeRateLimitError(5));
+
+      await expect(
+        adapter.fetchThread("line:bot-123:user:u-429")
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
+
+      mocks.getProfile.mockResolvedValue({ displayName: "John Doe" });
+      const result = await adapter.fetchThread("line:bot-123:user:u-429");
+
+      expect(result.metadata).toEqual({ displayName: "John Doe" });
+    });
+
+    it("rethrows a 429 instead of caching a degraded group thread", async () => {
+      mocks.getGroupSummary.mockRejectedValueOnce(makeRateLimitError(5));
+
+      await expect(
+        adapter.fetchThread("line:bot-123:group:g-429")
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
     });
 
     it("handles room thread without API call", async () => {

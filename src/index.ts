@@ -57,6 +57,8 @@ export const createLineAdapter = (
 };
 
 export { LineAdapter, LineFormatConverter } from "./adapter.js";
+export { LineMessage } from "./message.js";
+export type { LineMessageData } from "./message.js";
 export type {
   LineAdapterConfig,
   LineBatchSendResult,
@@ -66,8 +68,10 @@ export type {
   LineMulticastOptions,
   LinePostableAudio,
   LinePostableMessage,
+  LinePostableText,
   LinePostbackEvent,
   LineRawMessage,
+  LineTextOptions,
   LineThreadId,
   LineWebhookPayload,
 } from "./types.js";

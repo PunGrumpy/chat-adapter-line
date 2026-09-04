@@ -59,6 +59,27 @@ When your bot answers an inbound message, the adapter sends that first reply thr
 
 The Chat SDK's `PostableMessage` type does not know about LINE's extra fields, so wrap LINE-native postables in `linePostable()` when calling `thread.post()`. The helper only narrows the static type. The adapter accepts these shapes at runtime either way.
 
+### Quoted replies
+
+Every inbound text, image, video, and sticker message carries a `quoteToken`. Pass it back on a text postable to quote that message natively:
+
+```typescript
+import { LineMessage, linePostable } from "chat-adapter-line";
+
+bot.onSubscribedMessage(async (thread, message) => {
+  if (message instanceof LineMessage) {
+    await thread.post(
+      linePostable({
+        text: "Replying to this one",
+        quoteToken: message.quoteToken,
+      })
+    );
+  }
+});
+```
+
+`quoteToken` works on `text`, `raw`, `markdown`, and `ast` postables and survives both the Reply API and Push API paths. LINE cannot quote from a card or audio message, so combining those with a `quoteToken` throws a `ValidationError` rather than sending an unquoted message.
+
 ### Audio messages
 
 Pass an `audio` object with an HTTPS URL and the length in milliseconds to send a native LINE audio message:

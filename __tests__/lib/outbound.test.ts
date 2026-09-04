@@ -90,6 +90,18 @@ describe("toLineMessages", () => {
     ).toThrow(ValidationError);
   });
 
+  it("carries a quote token on text-rendering postables", () => {
+    expect(
+      toLineMessages({ markdown: "hi", quoteToken: "qt" }, converter)
+    ).toEqual([{ quoteToken: "qt", text: "hi", type: "text" }]);
+  });
+
+  it("rejects a non-string quote token", () => {
+    expect(() =>
+      toLineMessages({ quoteToken: 1, text: "hi" } as never, converter)
+    ).toThrow(ValidationError);
+  });
+
   it("throws when there is no content", () => {
     expect(() => toLineMessages({} as never, converter)).toThrow(
       ValidationError

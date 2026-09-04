@@ -2,7 +2,7 @@ import { extractCard, ValidationError } from "@chat-adapter/shared";
 import type { messagingApi } from "@line/bot-sdk";
 import type { AdapterPostableMessage, Root } from "chat";
 
-import type { LinePostableMessage } from "../types.js";
+import type { LinePostableMessage, LineTextOptions } from "../types.js";
 import { buildFlexMessage } from "./flex-messages.js";
 import type { LineFormatConverter } from "./format-converter.js";
 import { isRecord } from "./is-record.js";
@@ -27,6 +27,42 @@ const LINE_USER_ID_PATTERN = /^U[0-9a-f]{32}$/;
 /** `X-Line-Retry-Key` must be a hexadecimal UUID. */
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const readTextOptions = (message: Record<string, unknown>): LineTextOptions => {
+  const options: LineTextOptions = {};
+
+  if (message.quoteToken !== undefined) {
+    if (typeof message.quoteToken !== "string" || message.quoteToken === "") {
+      throw new ValidationError(
+        "line",
+        "quoteToken must be a non-empty string"
+      );
+    }
+    options.quoteToken = message.quoteToken;
+  }
+
+  return options;
+};
+
+const rejectQuote = (options: LineTextOptions, kind: string): void => {
+  if (options.quoteToken !== undefined) {
+    throw new ValidationError(
+      "line",
+      `LINE cannot quote a message from a ${kind} message. Send a text message instead.`
+    );
+  }
+};
+
+const buildTextMessage = (
+  text: string,
+  options: LineTextOptions
+): messagingApi.TextMessage => ({
+  text,
+  type: "text",
+  ...(options.quoteToken === undefined
+    ? {}
+    : { quoteToken: options.quoteToken }),
+});
 
 const isHttpsUrl = (value: string): boolean => {
   try {
@@ -74,7 +110,9 @@ const buildAudioMessage = (audio: unknown): messagingApi.AudioMessage => {
  * Converts one postable into LINE Messaging API message objects.
  *
  * Cards become Flex Messages, audio becomes a native audio message, and
- * everything else renders to text.
+ * everything else renders to text. Quote tokens are only accepted where
+ * LINE can carry them; other combinations throw instead of silently
+ * dropping the LINE-specific data.
  */
 export const toLineMessages = (
   message: LinePostableMessage,
@@ -88,33 +126,37 @@ export const toLineMessages = (
     throw new ValidationError("line", "No message content to send");
   }
 
+  const options = readTextOptions(message);
+
   const card = extractCard(message as AdapterPostableMessage);
   if (card) {
+    rejectQuote(options, "card");
     return [buildFlexMessage(card)];
   }
 
   if ("audio" in message) {
+    rejectQuote(options, "audio");
     return [buildAudioMessage(message.audio)];
   }
 
   if (typeof message.text === "string") {
-    return [{ text: message.text, type: "text" }];
+    return [buildTextMessage(message.text, options)];
   }
 
   if (typeof message.raw === "string") {
-    return [{ text: message.raw, type: "text" }];
+    return [buildTextMessage(message.raw, options)];
   }
 
   if (typeof message.markdown === "string") {
     const rendered = converter.renderPostable(
       message as AdapterPostableMessage
     );
-    return [{ text: rendered, type: "text" }];
+    return [buildTextMessage(rendered, options)];
   }
 
   if (message.ast) {
     const rendered = converter.fromAst(message.ast as Root);
-    return [{ text: toPlainText(rendered), type: "text" }];
+    return [buildTextMessage(toPlainText(rendered), options)];
   }
 
   throw new ValidationError("line", "No message content to send");
@@ -209,14 +251,15 @@ export const validateMulticastRecipients = (userIds: string[]): void => {
 /**
  * Types a LINE-native postable for `thread.post()`.
  *
- * The Chat SDK's `PostableMessage` union does not know about `audio`, so
- * passing one as an object literal fails TypeScript's excess property check.
+ * The Chat SDK's `PostableMessage` union does not know about `audio` or
+ * `quoteToken`, so passing one as an object literal fails TypeScript's excess
+ * property check.
  * The adapter accepts the wider `LinePostableMessage` at runtime; this helper
  * only narrows the static type.
  *
  * @example
  * ```ts
- * await thread.post(linePostable({ audio: { originalContentUrl, duration } }));
+ * await thread.post(linePostable({ text: "Got it", quoteToken }));
  * ```
  */
 export const linePostable = (

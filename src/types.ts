@@ -1,4 +1,10 @@
-import type { AdapterPostableMessage, Logger } from "chat";
+import type {
+  AdapterPostableMessage,
+  Logger,
+  PostableAst,
+  PostableMarkdown,
+  PostableRaw,
+} from "chat";
 
 /** Configuration for the LINE adapter */
 export interface LineAdapterConfig {
@@ -115,6 +121,20 @@ export interface LineBatchSendResult {
   recipientCount?: number;
 }
 
+/** LINE-specific options accepted on outbound text messages. */
+export interface LineTextOptions {
+  /**
+   * Quote token of the message to quote, taken from an inbound
+   * `LineMessage.quoteToken` or from a previously sent message.
+   */
+  quoteToken?: string;
+}
+
+/** Plain text with optional LINE quote data. */
+export interface LinePostableText extends LineTextOptions {
+  text: string;
+}
+
 /** Native LINE audio message. */
 export interface LinePostableAudio {
   audio: {
@@ -128,8 +148,16 @@ export interface LinePostableAudio {
 /**
  * Everything `LineAdapter.postMessage` accepts: the Chat SDK postables plus
  * LINE-native shapes.
+ *
+ * Quote tokens work on any postable that renders to text.
  */
-export type LinePostableMessage = AdapterPostableMessage | LinePostableAudio;
+export type LinePostableMessage =
+  | AdapterPostableMessage
+  | LinePostableText
+  | LinePostableAudio
+  | (PostableRaw & LineTextOptions)
+  | (PostableMarkdown & Pick<LineTextOptions, "quoteToken">)
+  | (PostableAst & Pick<LineTextOptions, "quoteToken">);
 
 /** Response from LINE send message API */
 export interface LineRawMessage {

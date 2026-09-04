@@ -20,13 +20,14 @@ import type {
   FetchResult,
   FormattedContent,
   Logger,
+  Message,
   RawMessage,
   StreamChunk,
   StreamOptions,
   ThreadInfo,
   WebhookOptions,
 } from "chat";
-import { ConsoleLogger, Message } from "chat";
+import { ConsoleLogger } from "chat";
 
 import { deserializePostbackData } from "./lib/flex-messages.js";
 import { LineFormatConverter } from "./lib/format-converter.js";
@@ -43,6 +44,7 @@ import {
   encodeThreadId,
   isDM as isDMThreadId,
 } from "./lib/thread-id.js";
+import { LineMessage } from "./message.js";
 import type {
   LineAdapterConfig,
   LineBatchSendResult,
@@ -66,6 +68,10 @@ const VALID_ATTACHMENT_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 type RawMessageType = LineMessageEvent["message"]["type"];
+
+interface SendResult {
+  sentMessages?: { id: string; quoteToken?: string }[];
+}
 
 const verifySignature = (
   body: string,
@@ -370,7 +376,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     );
   }
 
-  parseMessage(raw: LineMessageEvent): Message<LineEvent> {
+  parseMessage(raw: LineMessageEvent): LineMessage {
     const sourceId = getSourceIdFromEvent(raw);
 
     if (!this.channelId) {
@@ -398,6 +404,10 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     };
 
     const text = raw.message.type === "text" ? (raw.message.text ?? "") : "";
+    const quoteToken =
+      typeof raw.message.quoteToken === "string"
+        ? raw.message.quoteToken
+        : undefined;
 
     const attachments: Attachment[] = [];
     if (
@@ -418,7 +428,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       });
     }
 
-    return new Message({
+    return new LineMessage({
       attachments,
       author,
       formatted: this.converter.toAst(text),
@@ -427,6 +437,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         dateSent: new Date(raw.timestamp),
         edited: false,
       },
+      quoteToken,
       raw,
       text,
       threadId,
@@ -539,7 +550,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     threadId: string,
     sourceId: string,
     messages: messagingApi.Message[]
-  ): Promise<{ sentMessages?: { id: string }[] }> {
+  ): Promise<SendResult> {
     const replyToken = this.replyTokens.take(threadId);
 
     if (!replyToken) {
@@ -577,7 +588,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   private pushMessages(
     sourceId: string,
     messages: messagingApi.Message[]
-  ): Promise<{ sentMessages?: { id: string }[] }> {
+  ): Promise<SendResult> {
     return this.callLine(() =>
       this.client.pushMessage({
         messages,
@@ -639,18 +650,22 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   }
 
   private buildRawMessage(
-    result: { sentMessages?: { id: string }[] },
+    result: SendResult,
     text: string,
     threadId: string,
     type: RawMessageType = "text"
   ): RawMessage<LineEvent> {
-    const messageId = result.sentMessages?.[0]?.id ?? "";
+    const sent = result.sentMessages?.[0];
+    const messageId = sent?.id ?? "";
     return {
       id: messageId,
       raw: {
         deliveryContext: { isRedelivery: false },
         message: {
           id: messageId,
+          ...(sent?.quoteToken === undefined
+            ? {}
+            : { quoteToken: sent.quoteToken }),
           text,
           type,
         },

@@ -18,6 +18,7 @@ import {
 import type { Mock } from "vite-plus/test";
 
 import { LineAdapter, LineFormatConverter } from "../src/adapter.js";
+import { LineMessage } from "../src/message.js";
 import type { LineMessageEvent, LinePostbackEvent } from "../src/types.js";
 
 // Mock @line/bot-sdk - factory is self-contained
@@ -1618,7 +1619,7 @@ describe("LineAdapter", () => {
         })),
       } as never);
       mocks.pushMessage.mockResolvedValue({
-        sentMessages: [{ id: "pushed-1" }],
+        sentMessages: [{ id: "pushed-1", quoteToken: "sent-qt" }],
       });
       mocks.replyMessage.mockResolvedValue({
         sentMessages: [{ id: "replied-1" }],
@@ -1715,6 +1716,97 @@ describe("LineAdapter", () => {
       ).rejects.toBeInstanceOf(AdapterRateLimitError);
     });
 
+    it("exposes the sent message's quote token on the raw result", async () => {
+      const result = await adapter.postMessage(
+        "line:bot-123:user:u-123",
+        "Hello"
+      );
+
+      expect(
+        result.raw.type === "message" && result.raw.message.quoteToken
+      ).toBe("sent-qt");
+    });
+
+    it("carries a quote token on a text send via push", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        quoteToken: "qt-1",
+        text: "Quoting you",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ quoteToken: "qt-1", text: "Quoting you", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("carries a quote token on a text send via reply", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        quoteToken: "qt-1",
+        text: "Quoting you",
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ quoteToken: "qt-1", text: "Quoting you", type: "text" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("carries a quote token on markdown and raw sends", async () => {
+      mocks.stringifyMarkdown.mockReturnValueOnce("**bold**");
+
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        markdown: "**bold**",
+        quoteToken: "qt-md",
+      });
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        quoteToken: "qt-raw",
+        raw: "raw",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenNthCalledWith(1, {
+        messages: [{ quoteToken: "qt-md", text: "bold", type: "text" }],
+        to: "u-123",
+      });
+      expect(mocks.pushMessage).toHaveBeenNthCalledWith(2, {
+        messages: [{ quoteToken: "qt-raw", text: "raw", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("rejects a quote token on a card instead of sending unquoted", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          card: { children: [], title: "Card", type: "card" },
+          quoteToken: "qt-1",
+        } as never)
+      ).rejects.toThrow(/cannot quote/);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects a quote token on audio", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          audio,
+          quoteToken: "qt-1",
+        } as never)
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects an empty quote token", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          quoteToken: "",
+          text: "hi",
+        })
+      ).rejects.toBeInstanceOf(ValidationError);
+    });
+
     it("broadcasts audio alongside text", async () => {
       mocks.broadcastWithHttpInfo.mockResolvedValue(acceptedResponse("req-a"));
 
@@ -1730,6 +1822,44 @@ describe("LineAdapter", () => {
         undefined
       );
       expect(result.messageCount).toBe(2);
+    });
+  });
+
+  describe("parseMessage LINE-native fields", () => {
+    beforeEach(async () => {
+      await adapter.initialize({
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+      } as never);
+    });
+
+    it("returns a LineMessage carrying the quote token", () => {
+      const message = adapter.parseMessage(makeEvent());
+
+      expect(message).toBeInstanceOf(LineMessage);
+      expect(message.quoteToken).toBe("qt-1");
+    });
+
+    it("keeps the quote token on media messages", () => {
+      const message = adapter.parseMessage(
+        makeEvent({
+          message: { id: "img-1", quoteToken: "qt-img", type: "image" },
+        })
+      );
+
+      expect(message.quoteToken).toBe("qt-img");
+    });
+
+    it("leaves quoteToken unset when LINE sends none", () => {
+      const message = adapter.parseMessage(
+        makeEvent({ message: { id: "loc-1", type: "location" } })
+      );
+
+      expect(message.quoteToken).toBeUndefined();
     });
   });
 });

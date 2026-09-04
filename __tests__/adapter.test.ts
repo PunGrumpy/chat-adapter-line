@@ -6,6 +6,7 @@ import {
   PermissionError,
   ValidationError,
 } from "@chat-adapter/shared";
+import { deriveChannelId } from "chat";
 import {
   afterEach,
   beforeEach,
@@ -119,9 +120,6 @@ vi.mock("chat", async (importOriginal) => {
     ...actual,
     ConsoleLogger: MockConsoleLogger,
     Message: MockMessage,
-    deriveChannelId: vi.fn(
-      (_adapter: unknown, threadId: string) => threadId.split(":")[1] ?? ""
-    ),
     parseMarkdown,
     stringifyMarkdown,
   };
@@ -429,6 +427,38 @@ describe("LineAdapter", () => {
       });
 
       expect(encoded).toBe("line:bot-123:user:u-1");
+    });
+  });
+
+  describe("channelIdFromThreadId", () => {
+    it("parses the channel ID from the thread ID", () => {
+      expect(adapter.channelIdFromThreadId("line:bot-123:user:u-1")).toBe(
+        "bot-123"
+      );
+      expect(adapter.channelIdFromThreadId("line:bot-9:group:g-1")).toBe(
+        "bot-9"
+      );
+    });
+
+    it("throws on a malformed thread ID", () => {
+      expect(() => adapter.channelIdFromThreadId("slack:C1:T1")).toThrow(
+        /Invalid LINE thread ID/
+      );
+    });
+
+    it("does not recurse when the SDK derives the channel ID", () => {
+      expect(deriveChannelId(adapter, "line:bot-123:user:u-1")).toBe("bot-123");
+    });
+  });
+
+  describe("isDM", () => {
+    it.each([
+      ["line:bot-123:user:u-1", true],
+      ["line:bot-123:group:g-1", false],
+      ["line:bot-123:room:r-1", false],
+      ["not-a-thread-id", false],
+    ])("isDM(%s) is %s", (threadId, expected) => {
+      expect(adapter.isDM(threadId)).toBe(expected);
     });
   });
 

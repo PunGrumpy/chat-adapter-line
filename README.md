@@ -1,14 +1,16 @@
-# Chat SDK LINE Adapter
+# Chat SDK LINE adapter
 
-[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/) — send and receive messages from your bot.
+[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, quotes, audio, and batch messages back.
 
-## Installation
+## Install the package
 
 ```bash
 npm install chat-adapter-line
 ```
 
-## Usage
+## Set up a bot
+
+Create a `Chat` instance with the LINE adapter and register handlers:
 
 ```typescript
 import { Chat } from "chat";
@@ -31,19 +33,19 @@ bot.onSubscribedMessage(async (thread, message) => {
 });
 ```
 
-the factory reads credentials from the environment variables by default.
+The factory reads credentials from environment variables by default:
 
-| Environment Variable        | Required | Description                            |
+| Environment variable        | Required | Description                            |
 | --------------------------- | -------- | -------------------------------------- |
 | `LINE_CHANNEL_ACCESS_TOKEN` | Yes      | The access token for the LINE channel. |
 | `LINE_CHANNEL_SECRET`       | Yes      | The secret for the LINE channel.       |
 
-or pass them as options to the factory:
+You can also pass them as options to the factory:
 
 ```typescript
 const adapter = createLineAdapter({
-  channelAccessToken: "eyJhbG...",
-  channelSecret: "abc123...",
+  channelAccessToken: "your_channel_access_token",
+  channelSecret: "your_channel_secret",
 });
 ```
 
@@ -73,19 +75,19 @@ await adapter.multicastMessages(
 
 The adapter forwards `retryKey` as `X-Line-Retry-Key`. Reuse the same key when you retry a request whose outcome you don't know, and LINE delivers it once.
 
-Before calling LINE, the adapter validates user IDs, the retry key, aggregation units, and the five-message limit, and throws instead of truncating. 429 responses become `AdapterRateLimitError`. The returned `requestId` is LINE's `X-Line-Request-Id`, which you can use to reconcile the submission.
+Before calling LINE, the adapter validates user IDs, the retry key, and the five-message limit, and throws instead of truncating. 429 responses become `AdapterRateLimitError`. The returned `requestId` is LINE's `X-Line-Request-Id`, which you can use to reconcile the submission.
 
 ## License
 
 [MIT](./LICENSE)
 
-## Benchmarking
+## Run benchmarks
 
 This package includes targeted benchmarks for hot paths:
 
 - Markdown normalization (`toPlainText`)
-- Thread ID encode/decode
-- Webhook signature + parse path
+- Thread ID encode and decode
+- Webhook signature verification and parsing
 
 Run benchmarks:
 

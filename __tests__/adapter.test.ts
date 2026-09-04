@@ -18,6 +18,7 @@ import {
 import type { Mock } from "vite-plus/test";
 
 import { LineAdapter, LineFormatConverter } from "../src/adapter.js";
+import { LineMessage } from "../src/message.js";
 import type { LineMessageEvent, LinePostbackEvent } from "../src/types.js";
 
 // Mock @line/bot-sdk - factory is self-contained
@@ -103,6 +104,7 @@ vi.mock("chat", async (importOriginal) => {
     raw: unknown;
     metadata: unknown;
     author: unknown;
+    isMention?: boolean;
 
     constructor(data: Record<string, unknown>) {
       this.text = data.text as string;
@@ -113,6 +115,7 @@ vi.mock("chat", async (importOriginal) => {
       this.raw = data.raw;
       this.metadata = data.metadata;
       this.author = data.author;
+      this.isMention = data.isMention as boolean | undefined;
     }
   };
 
@@ -1604,6 +1607,487 @@ describe("LineAdapter", () => {
       await expect(
         adapter.multicastMessages([USER_A], "Hi")
       ).rejects.toBeInstanceOf(AdapterRateLimitError);
+    });
+  });
+
+  describe("postMessage LINE-native postables", () => {
+    beforeEach(async () => {
+      await adapter.initialize({
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+      } as never);
+      mocks.pushMessage.mockResolvedValue({
+        sentMessages: [{ id: "pushed-1", quoteToken: "sent-qt" }],
+      });
+      mocks.replyMessage.mockResolvedValue({
+        sentMessages: [{ id: "replied-1" }],
+      });
+    });
+
+    const audio = {
+      duration: 12_000,
+      originalContentUrl: "https://example.com/audio.m4a",
+    };
+
+    it("sends a native audio message via push", async () => {
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        audio,
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [
+          {
+            duration: 12_000,
+            originalContentUrl: "https://example.com/audio.m4a",
+            type: "audio",
+          },
+        ],
+        to: "u-123",
+      });
+      expect(result.id).toBe("pushed-1");
+      expect(result.raw.type === "message" && result.raw.message.type).toBe(
+        "audio"
+      );
+    });
+
+    it("sends a native audio message via reply when a token is available", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        audio,
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ ...audio, type: "audio" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(result.id).toBe("replied-1");
+    });
+
+    it("falls back to push for audio when the reply token is rejected", async () => {
+      await seedReplyToken(adapter, { replyToken: "stale-reply-token" });
+      mocks.replyMessage.mockRejectedValueOnce(makeReplyTokenError());
+
+      await adapter.postMessage("line:bot-123:user:u-123", { audio });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ ...audio, type: "audio" }],
+        to: "u-123",
+      });
+    });
+
+    it.each([
+      [
+        "http URL",
+        { ...audio, originalContentUrl: "http://example.com/a.m4a" },
+      ],
+      ["empty URL", { ...audio, originalContentUrl: "" }],
+      ["non-URL", { ...audio, originalContentUrl: "not a url" }],
+      ["zero duration", { ...audio, duration: 0 }],
+      ["negative duration", { ...audio, duration: -1 }],
+      ["fractional duration", { ...audio, duration: 1.5 }],
+      ["infinite duration", { ...audio, duration: Number.POSITIVE_INFINITY }],
+      ["NaN duration", { ...audio, duration: Number.NaN }],
+    ])("rejects audio with %s before calling LINE", async (_label, bad) => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { audio: bad })
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+    });
+
+    it("propagates provider failures for audio sends", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { audio })
+      ).rejects.toThrow("LINE is down");
+    });
+
+    it("maps a 429 on an audio send to AdapterRateLimitError", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(makeRateLimitError(3));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { audio })
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
+    });
+
+    it("exposes the sent message's quote token on the raw result", async () => {
+      const result = await adapter.postMessage(
+        "line:bot-123:user:u-123",
+        "Hello"
+      );
+
+      expect(
+        result.raw.type === "message" && result.raw.message.quoteToken
+      ).toBe("sent-qt");
+    });
+
+    it("carries a quote token on a text send via push", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        quoteToken: "qt-1",
+        text: "Quoting you",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ quoteToken: "qt-1", text: "Quoting you", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("carries a quote token on a text send via reply", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        quoteToken: "qt-1",
+        text: "Quoting you",
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ quoteToken: "qt-1", text: "Quoting you", type: "text" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("carries a quote token on markdown and raw sends", async () => {
+      mocks.stringifyMarkdown.mockReturnValueOnce("**bold**");
+
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        markdown: "**bold**",
+        quoteToken: "qt-md",
+      });
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        quoteToken: "qt-raw",
+        raw: "raw",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenNthCalledWith(1, {
+        messages: [{ quoteToken: "qt-md", text: "bold", type: "text" }],
+        to: "u-123",
+      });
+      expect(mocks.pushMessage).toHaveBeenNthCalledWith(2, {
+        messages: [{ quoteToken: "qt-raw", text: "raw", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("rejects a quote token on a card instead of sending unquoted", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          card: { children: [], title: "Card", type: "card" },
+          quoteToken: "qt-1",
+        } as never)
+      ).rejects.toThrow(/cannot quote/);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects a quote token on audio", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          audio,
+          quoteToken: "qt-1",
+        } as never)
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects an empty quote token", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          quoteToken: "",
+          text: "hi",
+        })
+      ).rejects.toBeInstanceOf(ValidationError);
+    });
+
+    it("encodes mentions as a textV2 message via push", async () => {
+      await adapter.postMessage("line:bot-123:group:g-1", {
+        mentions: [{ index: 6, length: 6, userId: "U-alice" }],
+        text: "Hello @Alice!",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [
+          {
+            substitution: {
+              mention0: {
+                mentionee: { type: "user", userId: "U-alice" },
+                type: "mention",
+              },
+            },
+            text: "Hello {mention0}!",
+            type: "textV2",
+          },
+        ],
+        to: "g-1",
+      });
+    });
+
+    it("encodes mentions via reply and keeps the quote token", async () => {
+      await seedReplyToken(adapter, {
+        replyToken: "group-reply-token",
+        source: { groupId: "g-1", type: "group", userId: "u-123" },
+      });
+
+      await adapter.postMessage("line:bot-123:group:g-1", {
+        mentions: [{ all: true, index: 0, length: 4 }],
+        quoteToken: "qt-1",
+        text: "@all look",
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [
+          {
+            quoteToken: "qt-1",
+            substitution: {
+              mention0: { mentionee: { type: "all" }, type: "mention" },
+            },
+            text: "{mention0} look",
+            type: "textV2",
+          },
+        ],
+        replyToken: "group-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects mentions in a 1:1 chat before calling LINE", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          mentions: [{ index: 0, length: 2, userId: "U-alice" }],
+          text: "@A hi",
+        })
+      ).rejects.toThrow(/1:1 chats/);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+    });
+
+    it("allows mentions in rooms", async () => {
+      await adapter.postMessage("line:bot-123:room:r-1", {
+        mentions: [{ index: 0, length: 2, userId: "U-alice" }],
+        text: "@A hi",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [expect.objectContaining({ type: "textV2" })],
+        to: "r-1",
+      });
+    });
+
+    it("rejects mentions on markdown instead of sending plain text", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:group:g-1", {
+          markdown: "Hello @Alice",
+          mentions: [{ index: 6, length: 6, userId: "U-alice" }],
+        } as never)
+      ).rejects.toThrow(/cannot encode mentions/);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects mentions on cards and audio", async () => {
+      const mentions = [{ index: 0, length: 1, userId: "U-alice" }];
+
+      await expect(
+        adapter.postMessage("line:bot-123:group:g-1", {
+          card: { children: [], title: "Card", type: "card" },
+          mentions,
+        } as never)
+      ).rejects.toBeInstanceOf(ValidationError);
+      await expect(
+        adapter.postMessage("line:bot-123:group:g-1", {
+          audio,
+          mentions,
+        } as never)
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects a mention that points outside the text", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:group:g-1", {
+          mentions: [{ index: 10, length: 5, userId: "U-alice" }],
+          text: "short",
+        })
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("still sends plain text when mentions is an empty array", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        mentions: [],
+        text: "plain",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ text: "plain", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("rejects mentions in broadcast and multicast", async () => {
+      const postable = {
+        mentions: [{ index: 0, length: 2, userId: "U-alice" }],
+        text: "@A hi",
+      };
+
+      await expect(adapter.broadcastMessages(postable)).rejects.toThrow(
+        /not broadcast or multicast/
+      );
+      await expect(
+        adapter.multicastMessages([`U${"a".repeat(32)}`], ["plain", postable])
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.broadcastWithHttpInfo).not.toHaveBeenCalled();
+      expect(mocks.multicastWithHttpInfo).not.toHaveBeenCalled();
+    });
+
+    it("broadcasts audio alongside text", async () => {
+      mocks.broadcastWithHttpInfo.mockResolvedValue(acceptedResponse("req-a"));
+
+      const result = await adapter.broadcastMessages(["Listen", { audio }]);
+
+      expect(mocks.broadcastWithHttpInfo).toHaveBeenCalledWith(
+        {
+          messages: [
+            { text: "Listen", type: "text" },
+            { ...audio, type: "audio" },
+          ],
+        },
+        undefined
+      );
+      expect(result.messageCount).toBe(2);
+    });
+  });
+
+  describe("parseMessage LINE-native fields", () => {
+    beforeEach(async () => {
+      await adapter.initialize({
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+      } as never);
+    });
+
+    it("returns a LineMessage carrying the quote token", () => {
+      const message = adapter.parseMessage(makeEvent());
+
+      expect(message).toBeInstanceOf(LineMessage);
+      expect(message.quoteToken).toBe("qt-1");
+      expect(message.mentions).toEqual([]);
+      expect(message.isMention).toBe(false);
+    });
+
+    it("decodes the mentionees array into mentions", () => {
+      const message = adapter.parseMessage(
+        makeEvent({
+          message: {
+            id: "msg-1",
+            mention: {
+              mentionees: [
+                {
+                  index: 0,
+                  isSelf: false,
+                  length: 6,
+                  type: "user",
+                  userId: "U-alice",
+                },
+                { index: 7, length: 4, type: "all" },
+                { index: 12, length: 4, type: "user" },
+              ],
+            },
+            quoteToken: "qt-2",
+            text: "@Alice @All @Bob hi",
+            type: "text",
+          },
+          source: { groupId: "g-1", type: "group", userId: "u-123" },
+        })
+      );
+
+      expect(message.mentions).toEqual([
+        { index: 0, isSelf: false, length: 6, type: "user", userId: "U-alice" },
+        { index: 7, length: 4, type: "all" },
+        { index: 12, length: 4, type: "user" },
+      ]);
+      expect(message.isMention).toBe(false);
+    });
+
+    it("marks the message as a mention when the bot is mentioned", () => {
+      const message = adapter.parseMessage(
+        makeEvent({
+          message: {
+            id: "msg-1",
+            mention: {
+              mentionees: [{ index: 0, isSelf: true, length: 4, type: "user" }],
+            },
+            quoteToken: "qt-3",
+            text: "@Bot hello",
+            type: "text",
+          },
+          source: { groupId: "g-1", type: "group", userId: "u-123" },
+        })
+      );
+
+      expect(message.isMention).toBe(true);
+      expect(message.mentions[0]?.isSelf).toBe(true);
+    });
+
+    it("drops malformed mentionees without failing the message", () => {
+      const message = adapter.parseMessage(
+        makeEvent({
+          message: {
+            id: "msg-1",
+            mention: {
+              mentionees: [
+                { index: "0", length: 4, type: "user" },
+                null,
+                { index: 5, length: 3, type: "unknown" },
+                { index: 9, length: 2, type: "user", userId: "U-ok" },
+              ] as never,
+            },
+            text: "@Bot @x @ok",
+            type: "text",
+          },
+        })
+      );
+
+      expect(message.mentions).toEqual([
+        { index: 9, length: 2, type: "user", userId: "U-ok" },
+      ]);
+    });
+
+    it("keeps the quote token on media messages and leaves mentions empty", () => {
+      const message = adapter.parseMessage(
+        makeEvent({
+          message: { id: "img-1", quoteToken: "qt-img", type: "image" },
+        })
+      );
+
+      expect(message.mentions).toEqual([]);
+      expect(message.quoteToken).toBe("qt-img");
+    });
+
+    it("leaves quoteToken unset when LINE sends none", () => {
+      const message = adapter.parseMessage(
+        makeEvent({ message: { id: "loc-1", type: "location" } })
+      );
+
+      expect(message.quoteToken).toBeUndefined();
     });
   });
 });

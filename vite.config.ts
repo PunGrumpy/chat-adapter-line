@@ -11,7 +11,7 @@ export default defineConfig({
     deps: {
       neverBundle: ["@chat-adapter/shared", "@line/bot-sdk", "chat"],
     },
-    dts: false,
+    dts: true,
     entry: "src/index.ts",
     fixedExtension: false,
     format: ["esm"],

@@ -55,6 +55,25 @@ LINE does not bill Reply API calls, but each Push API call counts against the ch
 
 When your bot answers an inbound message, the adapter sends that first reply through the Reply API. Later sends use the Push API, because a reply token works once and expires within a minute. You don't need to change any adapter code.
 
+### Direct messages and mentions
+
+A LINE thread whose source is a single user is a direct message, so `bot.onDirectMessage()` fires for 1:1 chats. In groups and rooms, LINE delivers native mentions as structured data. The adapter parses them onto the message and sets `message.isMention` when someone mentions the bot, so `onNewMention()` and `onMention()` work without any `@name` text matching.
+
+Inbound text messages are `LineMessage` instances. Each entry in `message.mentions` has a `type` of `user` or `all`, plus `index` and `length` for its position in the text. User mentions also carry `userId` and `isSelf` when the mentioned user has shared their profile with the channel:
+
+```typescript
+import { LineMessage } from "chat-adapter-line";
+
+bot.onSubscribedMessage(async (thread, message) => {
+  if (!(message instanceof LineMessage)) {
+    return;
+  }
+  for (const mention of message.mentions) {
+    console.log(mention.type, mention.userId, mention.isSelf);
+  }
+});
+```
+
 ### Posting LINE-native messages
 
 The Chat SDK's `PostableMessage` type does not know about LINE's extra fields, so wrap LINE-native postables in `linePostable()` when calling `thread.post()`. The helper only narrows the static type. The adapter accepts these shapes at runtime either way.
@@ -80,13 +99,35 @@ bot.onSubscribedMessage(async (thread, message) => {
 
 `quoteToken` works on `text`, `raw`, `markdown`, and `ast` postables and survives both the Reply API and Push API paths. LINE cannot quote from a card or audio message, so combining those with a `quoteToken` throws a `ValidationError` rather than sending an unquoted message.
 
+### Sending mentions
+
+Mentions need stable character offsets, so the adapter accepts them on `text` and `raw` postables only. LINE renders them in group chats and multi-person chats, through the Reply API or Push API, with at most 20 mentions per message. Each segment selects the span of your text that LINE replaces with the mention:
+
+```typescript
+await thread.post(
+  linePostable({
+    text: "Hello @Alice, please review",
+    mentions: [
+      { index: 6, length: 6, userId: "U1234567890abcdef1234567890abcdef" },
+    ],
+  })
+);
+
+await thread.post(
+  linePostable({
+    text: "@everyone stand-up in 5",
+    mentions: [{ all: true, index: 0, length: 9 }],
+  })
+);
+```
+
+The adapter encodes these as a LINE text message v2 with mention substitutions. Passing `mentions` on a Markdown, AST, card, or audio postable, in a 1:1 chat, or in a broadcast or multicast throws a `ValidationError`.
+
 ### Audio messages
 
 Pass an `audio` object with an HTTPS URL and the length in milliseconds to send a native LINE audio message:
 
 ```typescript
-import { linePostable } from "chat-adapter-line";
-
 await thread.post(
   linePostable({
     audio: {

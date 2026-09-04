@@ -102,6 +102,24 @@ describe("toLineMessages", () => {
     ).toThrow(ValidationError);
   });
 
+  it("rejects mentions that are not an array", () => {
+    expect(() =>
+      toLineMessages({ mentions: "U", text: "hi" } as never, converter)
+    ).toThrow(ValidationError);
+  });
+
+  it("rejects mentions on ast postables", () => {
+    expect(() =>
+      toLineMessages(
+        {
+          ast: { children: [], type: "root" },
+          mentions: [{ index: 0, length: 1, userId: "U" }],
+        } as never,
+        converter
+      )
+    ).toThrow(/cannot encode mentions/);
+  });
+
   it("throws when there is no content", () => {
     expect(() => toLineMessages({} as never, converter)).toThrow(
       ValidationError
@@ -150,6 +168,15 @@ describe("toBatchLineMessages", () => {
 
   it("rejects an empty list", () => {
     expect(() => toBatchLineMessages([], converter)).toThrow(ValidationError);
+  });
+
+  it("rejects messages carrying mention substitutions", () => {
+    expect(() =>
+      toBatchLineMessages(
+        { mentions: [{ index: 0, length: 2, userId: "U-a" }], text: "@A" },
+        converter
+      )
+    ).toThrow(/not broadcast or multicast/);
   });
 });
 

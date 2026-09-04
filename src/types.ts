@@ -21,6 +21,22 @@ export interface LineThreadId {
   sourceId: string;
 }
 
+/**
+ * A mention carried on an inbound LINE text message.
+ *
+ * `index` and `length` locate the mention text (for example `@Alice`) inside
+ * the message text. `userId` is only present when the mentioned user has
+ * consented to sharing their profile with the channel, and `isSelf` is true
+ * when the mentioned user is the bot itself.
+ */
+export interface LineMention {
+  type: "user" | "all";
+  index: number;
+  length: number;
+  userId?: string;
+  isSelf?: boolean;
+}
+
 /** Raw LINE webhook message event */
 export interface LineMessageEvent {
   type: "message";
@@ -36,8 +52,12 @@ export interface LineMessageEvent {
     id: string;
     text?: string;
     quoteToken?: string;
+    quotedMessageId?: string;
     markAsReadToken?: string;
     duration?: number;
+    mention?: {
+      mentionees: LineMention[];
+    };
     contentProvider?: {
       type: "line" | "external";
       originalContentUrl?: string;
@@ -93,6 +113,70 @@ export interface LineWebhookPayload {
   events: (LineEvent | Record<string, unknown>)[];
 }
 
+/** Response from LINE send message API */
+export interface LineRawMessage {
+  sentMessages: {
+    id: string;
+    quoteToken?: string;
+  }[];
+}
+
+/**
+ * A native mention to encode into an outbound text message.
+ *
+ * `index` and `length` select the span of the outbound text that LINE
+ * replaces with the mention. Set `userId` to mention one user, or `all: true`
+ * to mention everyone in a group or room.
+ */
+export interface LineMentionSegment {
+  index: number;
+  length: number;
+  userId?: string;
+  all?: boolean;
+}
+
+/** LINE-specific options accepted on outbound text messages. */
+export interface LineTextOptions {
+  /**
+   * Quote token of the message to quote, taken from an inbound
+   * `LineMessage.quoteToken` or from a previously sent message.
+   */
+  quoteToken?: string;
+  /** Native mentions to encode into the text. */
+  mentions?: LineMentionSegment[];
+}
+
+/** Plain text with optional LINE quote and mention data. */
+export interface LinePostableText extends LineTextOptions {
+  text: string;
+}
+
+/** Native LINE audio message. */
+export interface LinePostableAudio {
+  audio: {
+    /** HTTPS URL of the audio file. */
+    originalContentUrl: string;
+    /** Length of the audio in milliseconds. */
+    duration: number;
+  };
+}
+
+/**
+ * Everything `LineAdapter.postMessage` accepts: the Chat SDK postables plus
+ * LINE-native shapes.
+ *
+ * Quote tokens work on any postable that renders to text. Mentions need
+ * stable character offsets, so they are only accepted on `text` and `raw`
+ * postables, whose content is sent verbatim.
+ */
+export type LinePostableMessage =
+  | AdapterPostableMessage
+  | LinePostableText
+  | LinePostableAudio
+  | (PostableRaw & LineTextOptions)
+  | (PostableMarkdown & Pick<LineTextOptions, "quoteToken">)
+  | (PostableAst & Pick<LineTextOptions, "quoteToken">);
+
 /** Options for `LineAdapter.broadcastMessages`. */
 export interface LineBroadcastOptions {
   /**
@@ -119,50 +203,4 @@ export interface LineBatchSendResult {
   messageCount: number;
   /** Number of recipients addressed. Only set for multicast. */
   recipientCount?: number;
-}
-
-/** LINE-specific options accepted on outbound text messages. */
-export interface LineTextOptions {
-  /**
-   * Quote token of the message to quote, taken from an inbound
-   * `LineMessage.quoteToken` or from a previously sent message.
-   */
-  quoteToken?: string;
-}
-
-/** Plain text with optional LINE quote data. */
-export interface LinePostableText extends LineTextOptions {
-  text: string;
-}
-
-/** Native LINE audio message. */
-export interface LinePostableAudio {
-  audio: {
-    /** HTTPS URL of the audio file. */
-    originalContentUrl: string;
-    /** Length of the audio in milliseconds. */
-    duration: number;
-  };
-}
-
-/**
- * Everything `LineAdapter.postMessage` accepts: the Chat SDK postables plus
- * LINE-native shapes.
- *
- * Quote tokens work on any postable that renders to text.
- */
-export type LinePostableMessage =
-  | AdapterPostableMessage
-  | LinePostableText
-  | LinePostableAudio
-  | (PostableRaw & LineTextOptions)
-  | (PostableMarkdown & Pick<LineTextOptions, "quoteToken">)
-  | (PostableAst & Pick<LineTextOptions, "quoteToken">);
-
-/** Response from LINE send message API */
-export interface LineRawMessage {
-  sentMessages: {
-    id: string;
-    quoteToken?: string;
-  }[];
 }

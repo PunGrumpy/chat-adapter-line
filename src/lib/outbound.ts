@@ -6,6 +6,7 @@ import type { LinePostableMessage, LineTextOptions } from "../types.js";
 import { buildFlexMessage } from "./flex-messages.js";
 import type { LineFormatConverter } from "./format-converter.js";
 import { isRecord } from "./is-record.js";
+import { buildTextMessage } from "./mentions.js";
 import { toPlainText } from "./to-plain-text.js";
 
 /** LINE accepts at most five message objects per send request. */
@@ -41,6 +42,13 @@ const readTextOptions = (message: Record<string, unknown>): LineTextOptions => {
     options.quoteToken = message.quoteToken;
   }
 
+  if (message.mentions !== undefined) {
+    if (!Array.isArray(message.mentions)) {
+      throw new ValidationError("line", "mentions must be an array");
+    }
+    options.mentions = message.mentions;
+  }
+
   return options;
 };
 
@@ -53,16 +61,14 @@ const rejectQuote = (options: LineTextOptions, kind: string): void => {
   }
 };
 
-const buildTextMessage = (
-  text: string,
-  options: LineTextOptions
-): messagingApi.TextMessage => ({
-  text,
-  type: "text",
-  ...(options.quoteToken === undefined
-    ? {}
-    : { quoteToken: options.quoteToken }),
-});
+const rejectMentions = (options: LineTextOptions, kind: string): void => {
+  if (options.mentions !== undefined && options.mentions.length > 0) {
+    throw new ValidationError(
+      "line",
+      `LINE cannot encode mentions into a ${kind} message. Send a \`text\` or \`raw\` message instead.`
+    );
+  }
+};
 
 const isHttpsUrl = (value: string): boolean => {
   try {
@@ -110,16 +116,16 @@ const buildAudioMessage = (audio: unknown): messagingApi.AudioMessage => {
  * Converts one postable into LINE Messaging API message objects.
  *
  * Cards become Flex Messages, audio becomes a native audio message, and
- * everything else renders to text. Quote tokens are only accepted where
- * LINE can carry them; other combinations throw instead of silently
- * dropping the LINE-specific data.
+ * everything else renders to text. Quote tokens and mentions are only
+ * accepted where LINE can carry them; other combinations throw instead of
+ * silently dropping the LINE-specific data.
  */
 export const toLineMessages = (
   message: LinePostableMessage,
   converter: LineFormatConverter
 ): messagingApi.Message[] => {
   if (typeof message === "string") {
-    return [{ text: message, type: "text" }];
+    return [buildTextMessage(message)];
   }
 
   if (!isRecord(message)) {
@@ -131,11 +137,13 @@ export const toLineMessages = (
   const card = extractCard(message as AdapterPostableMessage);
   if (card) {
     rejectQuote(options, "card");
+    rejectMentions(options, "card");
     return [buildFlexMessage(card)];
   }
 
   if ("audio" in message) {
     rejectQuote(options, "audio");
+    rejectMentions(options, "audio");
     return [buildAudioMessage(message.audio)];
   }
 
@@ -148,6 +156,7 @@ export const toLineMessages = (
   }
 
   if (typeof message.markdown === "string") {
+    rejectMentions(options, "markdown");
     const rendered = converter.renderPostable(
       message as AdapterPostableMessage
     );
@@ -155,6 +164,7 @@ export const toLineMessages = (
   }
 
   if (message.ast) {
+    rejectMentions(options, "ast");
     const rendered = converter.fromAst(message.ast as Root);
     return [buildTextMessage(toPlainText(rendered), options)];
   }
@@ -162,10 +172,18 @@ export const toLineMessages = (
   throw new ValidationError("line", "No message content to send");
 };
 
+const hasMentionSubstitution = (message: messagingApi.Message): boolean =>
+  message.type === "textV2" &&
+  Object.values(message.substitution ?? {}).some(
+    (entry) => entry.type === "mention"
+  );
+
 /**
  * Converts one or more postables for a batch send. Throws when the result
  * exceeds LINE's per-request limit rather than truncating, because a dropped
- * message would silently reach the whole audience incomplete.
+ * message would silently reach the whole audience incomplete. LINE only
+ * substitutes mentions on reply and push messages, so mentions are rejected
+ * here too.
  */
 export const toBatchLineMessages = (
   messages: LinePostableMessage | LinePostableMessage[],
@@ -186,6 +204,13 @@ export const toBatchLineMessages = (
     throw new ValidationError(
       "line",
       `LINE accepts at most ${MAX_MESSAGES_PER_REQUEST} messages per request, got ${lineMessages.length}`
+    );
+  }
+
+  if (lineMessages.some(hasMentionSubstitution)) {
+    throw new ValidationError(
+      "line",
+      "LINE only renders mentions on reply and push messages, not broadcast or multicast"
     );
   }
 
@@ -251,11 +276,10 @@ export const validateMulticastRecipients = (userIds: string[]): void => {
 /**
  * Types a LINE-native postable for `thread.post()`.
  *
- * The Chat SDK's `PostableMessage` union does not know about `audio` or
- * `quoteToken`, so passing one as an object literal fails TypeScript's excess
- * property check.
- * The adapter accepts the wider `LinePostableMessage` at runtime; this helper
- * only narrows the static type.
+ * The Chat SDK's `PostableMessage` union does not know about `audio`,
+ * `quoteToken`, or `mentions`, so passing one as an object literal fails
+ * TypeScript's excess property check. The adapter accepts the wider
+ * `LinePostableMessage` at runtime; this helper only narrows the static type.
  *
  * @example
  * ```ts

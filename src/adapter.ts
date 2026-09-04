@@ -31,6 +31,7 @@ import { ConsoleLogger } from "chat";
 
 import { deserializePostbackData } from "./lib/flex-messages.js";
 import { LineFormatConverter } from "./lib/format-converter.js";
+import { parseInboundMentions } from "./lib/mentions.js";
 import {
   toBatchLineMessages,
   toLineMessages,
@@ -403,17 +404,17 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       userName: userId,
     };
 
-    const text = raw.message.type === "text" ? (raw.message.text ?? "") : "";
+    const isText = raw.message.type === "text";
+    const text = isText ? (raw.message.text ?? "") : "";
+    const mentions = isText ? parseInboundMentions(raw.message) : [];
+    const mentionsBot = mentions.some((mention) => mention.isSelf === true);
     const quoteToken =
       typeof raw.message.quoteToken === "string"
         ? raw.message.quoteToken
         : undefined;
 
     const attachments: Attachment[] = [];
-    if (
-      raw.message.type !== "text" &&
-      VALID_ATTACHMENT_TYPES.has(raw.message.type)
-    ) {
+    if (!isText && VALID_ATTACHMENT_TYPES.has(raw.message.type)) {
       const messageId = raw.message.id;
       attachments.push({
         fetchData: async () => {
@@ -433,6 +434,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       author,
       formatted: this.converter.toAst(text),
       id: raw.webhookEventId,
+      isMention: mentionsBot,
+      mentions,
       metadata: {
         dateSent: new Date(raw.timestamp),
         edited: false,
@@ -448,7 +451,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     threadId: string,
     message: LinePostableMessage
   ): Promise<RawMessage<LineEvent>> {
-    const { sourceId } = this.decodeThreadId(threadId);
+    const { sourceId, sourceType } = this.decodeThreadId(threadId);
 
     const files = extractFiles(message as AdapterPostableMessage);
     if (files.length > 0) {
@@ -458,6 +461,13 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     }
 
     const lineMessages = toLineMessages(message, this.converter);
+
+    if (sourceType === "user" && lineMessages[0]?.type === "textV2") {
+      throw new ValidationError(
+        "line",
+        "LINE only renders mentions in group chats and multi-person chats, not 1:1 chats"
+      );
+    }
 
     const result = await this.sendMessages(threadId, sourceId, lineMessages);
     const sentType = lineMessages[0]?.type === "audio" ? "audio" : "text";

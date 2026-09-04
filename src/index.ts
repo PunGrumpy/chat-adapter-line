@@ -64,6 +64,8 @@ export type {
   LineBatchSendResult,
   LineBroadcastOptions,
   LineEvent,
+  LineMention,
+  LineMentionSegment,
   LineMessageEvent,
   LineMulticastOptions,
   LinePostableAudio,
@@ -82,4 +84,5 @@ export {
   deserializePostbackData,
   serializePostbackData,
 } from "./lib/flex-messages.js";
+export { buildTextMessage } from "./lib/mentions.js";
 export { linePostable, toLineMessages } from "./lib/outbound.js";

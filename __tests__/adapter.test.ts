@@ -104,6 +104,7 @@ vi.mock("chat", async (importOriginal) => {
     raw: unknown;
     metadata: unknown;
     author: unknown;
+    isMention?: boolean;
 
     constructor(data: Record<string, unknown>) {
       this.text = data.text as string;
@@ -114,6 +115,7 @@ vi.mock("chat", async (importOriginal) => {
       this.raw = data.raw;
       this.metadata = data.metadata;
       this.author = data.author;
+      this.isMention = data.isMention as boolean | undefined;
     }
   };
 
@@ -1807,6 +1809,151 @@ describe("LineAdapter", () => {
       ).rejects.toBeInstanceOf(ValidationError);
     });
 
+    it("encodes mentions as a textV2 message via push", async () => {
+      await adapter.postMessage("line:bot-123:group:g-1", {
+        mentions: [{ index: 6, length: 6, userId: "U-alice" }],
+        text: "Hello @Alice!",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [
+          {
+            substitution: {
+              mention0: {
+                mentionee: { type: "user", userId: "U-alice" },
+                type: "mention",
+              },
+            },
+            text: "Hello {mention0}!",
+            type: "textV2",
+          },
+        ],
+        to: "g-1",
+      });
+    });
+
+    it("encodes mentions via reply and keeps the quote token", async () => {
+      await seedReplyToken(adapter, {
+        replyToken: "group-reply-token",
+        source: { groupId: "g-1", type: "group", userId: "u-123" },
+      });
+
+      await adapter.postMessage("line:bot-123:group:g-1", {
+        mentions: [{ all: true, index: 0, length: 4 }],
+        quoteToken: "qt-1",
+        text: "@all look",
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [
+          {
+            quoteToken: "qt-1",
+            substitution: {
+              mention0: { mentionee: { type: "all" }, type: "mention" },
+            },
+            text: "{mention0} look",
+            type: "textV2",
+          },
+        ],
+        replyToken: "group-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects mentions in a 1:1 chat before calling LINE", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          mentions: [{ index: 0, length: 2, userId: "U-alice" }],
+          text: "@A hi",
+        })
+      ).rejects.toThrow(/1:1 chats/);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+    });
+
+    it("allows mentions in rooms", async () => {
+      await adapter.postMessage("line:bot-123:room:r-1", {
+        mentions: [{ index: 0, length: 2, userId: "U-alice" }],
+        text: "@A hi",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [expect.objectContaining({ type: "textV2" })],
+        to: "r-1",
+      });
+    });
+
+    it("rejects mentions on markdown instead of sending plain text", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:group:g-1", {
+          markdown: "Hello @Alice",
+          mentions: [{ index: 6, length: 6, userId: "U-alice" }],
+        } as never)
+      ).rejects.toThrow(/cannot encode mentions/);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects mentions on cards and audio", async () => {
+      const mentions = [{ index: 0, length: 1, userId: "U-alice" }];
+
+      await expect(
+        adapter.postMessage("line:bot-123:group:g-1", {
+          card: { children: [], title: "Card", type: "card" },
+          mentions,
+        } as never)
+      ).rejects.toBeInstanceOf(ValidationError);
+      await expect(
+        adapter.postMessage("line:bot-123:group:g-1", {
+          audio,
+          mentions,
+        } as never)
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects a mention that points outside the text", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:group:g-1", {
+          mentions: [{ index: 10, length: 5, userId: "U-alice" }],
+          text: "short",
+        })
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("still sends plain text when mentions is an empty array", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        mentions: [],
+        text: "plain",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ text: "plain", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("rejects mentions in broadcast and multicast", async () => {
+      const postable = {
+        mentions: [{ index: 0, length: 2, userId: "U-alice" }],
+        text: "@A hi",
+      };
+
+      await expect(adapter.broadcastMessages(postable)).rejects.toThrow(
+        /not broadcast or multicast/
+      );
+      await expect(
+        adapter.multicastMessages([`U${"a".repeat(32)}`], ["plain", postable])
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.broadcastWithHttpInfo).not.toHaveBeenCalled();
+      expect(mocks.multicastWithHttpInfo).not.toHaveBeenCalled();
+    });
+
     it("broadcasts audio alongside text", async () => {
       mocks.broadcastWithHttpInfo.mockResolvedValue(acceptedResponse("req-a"));
 
@@ -1842,15 +1989,96 @@ describe("LineAdapter", () => {
 
       expect(message).toBeInstanceOf(LineMessage);
       expect(message.quoteToken).toBe("qt-1");
+      expect(message.mentions).toEqual([]);
+      expect(message.isMention).toBe(false);
     });
 
-    it("keeps the quote token on media messages", () => {
+    it("decodes the mentionees array into mentions", () => {
+      const message = adapter.parseMessage(
+        makeEvent({
+          message: {
+            id: "msg-1",
+            mention: {
+              mentionees: [
+                {
+                  index: 0,
+                  isSelf: false,
+                  length: 6,
+                  type: "user",
+                  userId: "U-alice",
+                },
+                { index: 7, length: 4, type: "all" },
+                { index: 12, length: 4, type: "user" },
+              ],
+            },
+            quoteToken: "qt-2",
+            text: "@Alice @All @Bob hi",
+            type: "text",
+          },
+          source: { groupId: "g-1", type: "group", userId: "u-123" },
+        })
+      );
+
+      expect(message.mentions).toEqual([
+        { index: 0, isSelf: false, length: 6, type: "user", userId: "U-alice" },
+        { index: 7, length: 4, type: "all" },
+        { index: 12, length: 4, type: "user" },
+      ]);
+      expect(message.isMention).toBe(false);
+    });
+
+    it("marks the message as a mention when the bot is mentioned", () => {
+      const message = adapter.parseMessage(
+        makeEvent({
+          message: {
+            id: "msg-1",
+            mention: {
+              mentionees: [{ index: 0, isSelf: true, length: 4, type: "user" }],
+            },
+            quoteToken: "qt-3",
+            text: "@Bot hello",
+            type: "text",
+          },
+          source: { groupId: "g-1", type: "group", userId: "u-123" },
+        })
+      );
+
+      expect(message.isMention).toBe(true);
+      expect(message.mentions[0]?.isSelf).toBe(true);
+    });
+
+    it("drops malformed mentionees without failing the message", () => {
+      const message = adapter.parseMessage(
+        makeEvent({
+          message: {
+            id: "msg-1",
+            mention: {
+              mentionees: [
+                { index: "0", length: 4, type: "user" },
+                null,
+                { index: 5, length: 3, type: "unknown" },
+                { index: 9, length: 2, type: "user", userId: "U-ok" },
+              ] as never,
+            },
+            text: "@Bot @x @ok",
+            type: "text",
+          },
+        })
+      );
+
+      expect(message.mentions).toEqual([
+        { index: 9, length: 2, type: "user", userId: "U-ok" },
+      ]);
+    });
+
+    it("keeps the quote token on media messages and leaves mentions empty", () => {
       const message = adapter.parseMessage(
         makeEvent({
           message: { id: "img-1", quoteToken: "qt-img", type: "image" },
         })
       );
 
+      expect(message.mentions).toEqual([]);
       expect(message.quoteToken).toBe("qt-img");
     });
 

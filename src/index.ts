@@ -59,8 +59,11 @@ export const createLineAdapter = (
 export { LineAdapter, LineFormatConverter } from "./adapter.js";
 export type {
   LineAdapterConfig,
+  LineBatchSendResult,
+  LineBroadcastOptions,
   LineEvent,
   LineMessageEvent,
+  LineMulticastOptions,
   LinePostbackEvent,
   LineRawMessage,
   LineThreadId,
@@ -73,3 +76,4 @@ export {
   deserializePostbackData,
   serializePostbackData,
 } from "./lib/flex-messages.js";
+export { toLineMessages } from "./lib/outbound.js";

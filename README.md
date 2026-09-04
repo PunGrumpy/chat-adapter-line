@@ -53,6 +53,28 @@ LINE does not bill Reply API calls, but each Push API call counts against the ch
 
 When your bot answers an inbound message, the adapter sends that first reply through the Reply API. Later sends use the Push API, because a reply token works once and expires within a minute. You don't need to change any adapter code.
 
+### Broadcast and multicast
+
+`broadcastMessages()` sends to every follower of the channel and `multicastMessages()` sends to up to 500 user IDs. Both accept a single postable or an array of up to five, reuse the same conversion as `postMessage()`, and never consume a reply token:
+
+```typescript
+const adapter = createLineAdapter();
+
+const { requestId } = await adapter.broadcastMessages("New release is out", {
+  retryKey: crypto.randomUUID(),
+});
+
+await adapter.multicastMessages(
+  ["U1234567890abcdef1234567890abcdef", "U2345678901abcdef2345678901abcdef"],
+  [{ markdown: "**Reminder**: stand-up at 10" }, "See you there"],
+  { retryKey: crypto.randomUUID(), notificationDisabled: true }
+);
+```
+
+The adapter forwards `retryKey` as `X-Line-Retry-Key`. Reuse the same key when you retry a request whose outcome you don't know, and LINE delivers it once.
+
+Before calling LINE, the adapter validates user IDs, the retry key, aggregation units, and the five-message limit, and throws instead of truncating. 429 responses become `AdapterRateLimitError`. The returned `requestId` is LINE's `X-Line-Request-Id`, which you can use to reconcile the submission.
+
 ## License
 
 [MIT](./LICENSE)

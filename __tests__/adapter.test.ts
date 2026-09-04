@@ -29,6 +29,8 @@ vi.mock("@line/bot-sdk", () => {
   const getGroupSummary = vi.fn();
   const acquireChatControl = vi.fn();
   const getMessageContent = vi.fn();
+  const broadcastWithHttpInfo = vi.fn();
+  const multicastWithHttpInfo = vi.fn();
 
   class HTTPFetchError extends Error {
     status: number;
@@ -51,10 +53,12 @@ vi.mock("@line/bot-sdk", () => {
 
   class MockLineBotClient {
     acquireChatControl = acquireChatControl;
+    broadcastWithHttpInfo = broadcastWithHttpInfo;
     getBotInfo = getBotInfo;
     getGroupSummary = getGroupSummary;
     getMessageContent = getMessageContent;
     getProfile = getProfile;
+    multicastWithHttpInfo = multicastWithHttpInfo;
     pushMessage = pushMessage;
     replyMessage = replyMessage;
 
@@ -65,10 +69,12 @@ vi.mock("@line/bot-sdk", () => {
   (globalThis as any).__lineMocks = {
     HTTPFetchError,
     acquireChatControl,
+    broadcastWithHttpInfo,
     getBotInfo,
     getGroupSummary,
     getMessageContent,
     getProfile,
+    multicastWithHttpInfo,
     pushMessage,
     replyMessage,
   };
@@ -126,6 +132,8 @@ vi.mock("chat", async (importOriginal) => {
 });
 
 interface Mocks {
+  broadcastWithHttpInfo: Mock;
+  multicastWithHttpInfo: Mock;
   pushMessage: Mock;
   replyMessage: Mock;
   getBotInfo: Mock;
@@ -257,6 +265,15 @@ const makeRateLimitError = (retryAfterSeconds?: number): Error => {
     headers
   ) as Error;
 };
+
+/** Mimics the LINE SDK's `*WithHttpInfo` response for an accepted batch send. */
+const acceptedResponse = (requestId?: string) => ({
+  body: {},
+  httpResponse: new Response(null, {
+    headers: requestId ? { "x-line-request-id": requestId } : {},
+    status: 200,
+  }),
+});
 
 /** Delivers a webhook event to seed the reply-token store for a thread. */
 const seedReplyToken = async (
@@ -854,6 +871,15 @@ describe("LineAdapter", () => {
       ).rejects.toThrow(ValidationError);
     });
 
+    it("sends a raw postable as text", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", { raw: "as-is" });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ text: "as-is", type: "text" }],
+        to: "u-123",
+      });
+    });
+
     it("limits to 5 messages", async () => {
       mocks.pushMessage.mockResolvedValue({
         sentMessages: [{ id: "sent-1" }],
@@ -1390,6 +1416,194 @@ describe("LineAdapter", () => {
       } as never);
 
       expect(result).toBe("hello");
+    });
+  });
+
+  describe("broadcastMessages / multicastMessages", () => {
+    const RETRY_KEY = "123e4567-e89b-12d3-a456-426614174000";
+    const USER_A = `U${"a".repeat(32)}`;
+    const USER_B = `U${"b".repeat(32)}`;
+
+    beforeEach(async () => {
+      await adapter.initialize({
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+      } as never);
+      mocks.broadcastWithHttpInfo.mockResolvedValue(acceptedResponse("req-b"));
+      mocks.multicastWithHttpInfo.mockResolvedValue(acceptedResponse("req-m"));
+      mocks.pushMessage.mockResolvedValue({ sentMessages: [{ id: "p-1" }] });
+      mocks.replyMessage.mockResolvedValue({ sentMessages: [{ id: "r-1" }] });
+    });
+
+    it("broadcasts converted messages and returns the request ID", async () => {
+      const result = await adapter.broadcastMessages("Hello everyone", {
+        retryKey: RETRY_KEY,
+      });
+
+      expect(mocks.broadcastWithHttpInfo).toHaveBeenCalledWith(
+        { messages: [{ text: "Hello everyone", type: "text" }] },
+        RETRY_KEY
+      );
+      expect(result).toEqual({ messageCount: 1, requestId: "req-b" });
+    });
+
+    it("broadcasts several postables in one request", async () => {
+      mocks.stringifyMarkdown.mockReturnValueOnce("# Title");
+
+      const result = await adapter.broadcastMessages(
+        [
+          { markdown: "# Title" },
+          { raw: "plain" },
+          { card: { children: [], title: "Card", type: "card" } },
+        ],
+        { notificationDisabled: true }
+      );
+
+      expect(mocks.broadcastWithHttpInfo).toHaveBeenCalledWith(
+        {
+          messages: [
+            { text: "Title", type: "text" },
+            { text: "plain", type: "text" },
+            expect.objectContaining({ type: "flex" }),
+          ],
+          notificationDisabled: true,
+        },
+        undefined
+      );
+      expect(result.messageCount).toBe(3);
+    });
+
+    it("returns an undefined request ID when LINE omits the header", async () => {
+      mocks.broadcastWithHttpInfo.mockResolvedValueOnce(acceptedResponse());
+
+      const result = await adapter.broadcastMessages("Hi");
+
+      expect(result.requestId).toBeUndefined();
+    });
+
+    it("rejects more than five messages instead of truncating", async () => {
+      await expect(
+        adapter.broadcastMessages(["1", "2", "3", "4", "5", "6"])
+      ).rejects.toThrow(/at most 5 messages/);
+
+      expect(mocks.broadcastWithHttpInfo).not.toHaveBeenCalled();
+    });
+
+    it("rejects an empty message list", async () => {
+      await expect(adapter.broadcastMessages([])).rejects.toBeInstanceOf(
+        ValidationError
+      );
+    });
+
+    it("rejects a retry key that is not a UUID", async () => {
+      await expect(
+        adapter.broadcastMessages("Hi", { retryKey: "not-a-uuid" })
+      ).rejects.toThrow(/retryKey must be a UUID/);
+
+      expect(mocks.broadcastWithHttpInfo).not.toHaveBeenCalled();
+    });
+
+    it("does not consume a pending reply token", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      await adapter.broadcastMessages("Announcement");
+      await adapter.postMessage("line:bot-123:user:u-123", "Reply");
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Reply", type: "text" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("maps a 429 broadcast to AdapterRateLimitError", async () => {
+      mocks.broadcastWithHttpInfo.mockRejectedValueOnce(makeRateLimitError(12));
+
+      const promise = adapter.broadcastMessages("Hi");
+
+      await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
+      await expect(promise).rejects.toMatchObject({ retryAfter: 12 });
+    });
+
+    it("propagates other broadcast failures unchanged", async () => {
+      mocks.broadcastWithHttpInfo.mockRejectedValueOnce(new Error("boom"));
+
+      await expect(adapter.broadcastMessages("Hi")).rejects.toThrow("boom");
+    });
+
+    it("multicasts to the given user IDs", async () => {
+      const result = await adapter.multicastMessages(
+        [USER_A, USER_B],
+        { text: "Hi both" } as never,
+        {
+          customAggregationUnits: ["promo_a"],
+          notificationDisabled: false,
+          retryKey: RETRY_KEY,
+        }
+      );
+
+      expect(mocks.multicastWithHttpInfo).toHaveBeenCalledWith(
+        {
+          customAggregationUnits: ["promo_a"],
+          messages: [{ text: "Hi both", type: "text" }],
+          notificationDisabled: false,
+          to: [USER_A, USER_B],
+        },
+        RETRY_KEY
+      );
+      expect(result).toEqual({
+        messageCount: 1,
+        recipientCount: 2,
+        requestId: "req-m",
+      });
+    });
+
+    it.each([
+      ["no recipients", []],
+      ["a malformed user ID", ["u-123"]],
+      ["a non-string entry", [USER_A, 42 as never]],
+      ["more than 500 recipients", Array.from({ length: 501 }, () => USER_A)],
+    ])("rejects multicast with %s", async (_label, userIds) => {
+      await expect(
+        adapter.multicastMessages(userIds, "Hi")
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.multicastWithHttpInfo).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["two units", ["a", "b"]],
+      ["an empty unit", [""]],
+      ["a 31-character unit", ["x".repeat(31)]],
+      ["a non-string unit", [7 as never]],
+    ])("rejects multicast with %s", async (_label, units) => {
+      await expect(
+        adapter.multicastMessages([USER_A], "Hi", {
+          customAggregationUnits: units,
+        })
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.multicastWithHttpInfo).not.toHaveBeenCalled();
+    });
+
+    it("accepts exactly 500 recipients", async () => {
+      const userIds = Array.from({ length: 500 }, () => USER_A);
+
+      const result = await adapter.multicastMessages(userIds, "Hi");
+
+      expect(result.recipientCount).toBe(500);
+    });
+
+    it("maps a 429 multicast to AdapterRateLimitError", async () => {
+      mocks.multicastWithHttpInfo.mockRejectedValueOnce(makeRateLimitError());
+
+      await expect(
+        adapter.multicastMessages([USER_A], "Hi")
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
     });
   });
 });

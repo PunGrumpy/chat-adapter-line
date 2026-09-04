@@ -32,7 +32,6 @@ import {
   BaseFormatConverter,
   ConsoleLogger,
   Message,
-  deriveChannelId,
   parseMarkdown,
   stringifyMarkdown,
 } from "chat";
@@ -42,7 +41,11 @@ import {
   deserializePostbackData,
 } from "./lib/flex-messages.js";
 import { ReplyTokenStore } from "./lib/reply-token-store.js";
-import { decodeThreadId, encodeThreadId, isDM } from "./lib/thread-id.js";
+import {
+  decodeThreadId,
+  encodeThreadId,
+  isDM as isDMThreadId,
+} from "./lib/thread-id.js";
 import { toPlainText } from "./lib/to-plain-text.js";
 import type {
   LineAdapterConfig,
@@ -244,7 +247,12 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   }
 
   channelIdFromThreadId(threadId: string): string {
-    return deriveChannelId(this, threadId);
+    return decodeThreadId(threadId).channelId;
+  }
+
+  /** A LINE thread is a DM when its source is a single user. */
+  isDM(threadId: string): boolean {
+    return isDMThreadId(threadId);
   }
 
   encodeThreadId(data: LineThreadId): string {
@@ -667,8 +675,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return cached.info;
     }
 
-    const { sourceType, sourceId } = this.decodeThreadId(threadId);
-    const channelId = this.channelIdFromThreadId(threadId);
+    const { sourceType, sourceId, channelId } = this.decodeThreadId(threadId);
 
     let result: ThreadInfo;
 
@@ -755,7 +762,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   }
 
   async startTyping(threadId: string): Promise<void> {
-    if (!isDM(threadId)) {
+    if (!this.isDM(threadId)) {
       return;
     }
 

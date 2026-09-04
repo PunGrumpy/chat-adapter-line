@@ -1,4 +1,4 @@
-import type { Logger } from "chat";
+import type { AdapterPostableMessage, Logger } from "chat";
 
 /** Configuration for the LINE adapter */
 export interface LineAdapterConfig {
@@ -114,6 +114,22 @@ export interface LineBatchSendResult {
   /** Number of recipients addressed. Only set for multicast. */
   recipientCount?: number;
 }
+
+/** Native LINE audio message. */
+export interface LinePostableAudio {
+  audio: {
+    /** HTTPS URL of the audio file. */
+    originalContentUrl: string;
+    /** Length of the audio in milliseconds. */
+    duration: number;
+  };
+}
+
+/**
+ * Everything `LineAdapter.postMessage` accepts: the Chat SDK postables plus
+ * LINE-native shapes.
+ */
+export type LinePostableMessage = AdapterPostableMessage | LinePostableAudio;
 
 /** Response from LINE send message API */
 export interface LineRawMessage {

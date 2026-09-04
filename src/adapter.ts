@@ -50,6 +50,7 @@ import type {
   LineEvent,
   LineMessageEvent,
   LineMulticastOptions,
+  LinePostableMessage,
   LinePostbackEvent,
   LineThreadId,
   LineWebhookPayload,
@@ -63,6 +64,8 @@ const VALID_ATTACHMENT_TYPES: ReadonlySet<string> = new Set([
   "audio",
   "file",
 ]);
+
+type RawMessageType = LineMessageEvent["message"]["type"];
 
 const verifySignature = (
   body: string,
@@ -432,11 +435,11 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
   async postMessage(
     threadId: string,
-    message: AdapterPostableMessage
+    message: LinePostableMessage
   ): Promise<RawMessage<LineEvent>> {
     const { sourceId } = this.decodeThreadId(threadId);
 
-    const files = extractFiles(message);
+    const files = extractFiles(message as AdapterPostableMessage);
     if (files.length > 0) {
       this.logger.warn("File attachments are not directly supported in LINE", {
         count: files.length,
@@ -446,8 +449,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     const lineMessages = toLineMessages(message, this.converter);
 
     const result = await this.sendMessages(threadId, sourceId, lineMessages);
+    const sentType = lineMessages[0]?.type === "audio" ? "audio" : "text";
 
-    return this.buildRawMessage(result, "", threadId);
+    return this.buildRawMessage(result, "", threadId, sentType);
   }
 
   /**
@@ -459,7 +463,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
    * unknown; LINE then deduplicates delivery instead of sending twice.
    */
   async broadcastMessages(
-    messages: AdapterPostableMessage | AdapterPostableMessage[],
+    messages: LinePostableMessage | LinePostableMessage[],
     options: LineBroadcastOptions = {}
   ): Promise<LineBatchSendResult> {
     validateRetryKey(options.retryKey);
@@ -491,7 +495,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
    */
   async multicastMessages(
     userIds: string[],
-    messages: AdapterPostableMessage | AdapterPostableMessage[],
+    messages: LinePostableMessage | LinePostableMessage[],
     options: LineMulticastOptions = {}
   ): Promise<LineBatchSendResult> {
     validateRetryKey(options.retryKey);
@@ -637,7 +641,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   private buildRawMessage(
     result: { sentMessages?: { id: string }[] },
     text: string,
-    threadId: string
+    threadId: string,
+    type: RawMessageType = "text"
   ): RawMessage<LineEvent> {
     const messageId = result.sentMessages?.[0]?.id ?? "";
     return {
@@ -647,7 +652,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         message: {
           id: messageId,
           text,
-          type: "text",
+          type,
         },
         mode: "active",
         replyToken: "",
@@ -680,7 +685,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   editMessage(
     _threadId: string,
     _messageId: string,
-    _message: AdapterPostableMessage
+    _message: LinePostableMessage
   ): Promise<RawMessage<LineEvent>> {
     throw new PermissionError("line", "LINE does not support message editing");
   }

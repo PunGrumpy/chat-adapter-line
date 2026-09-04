@@ -55,6 +55,29 @@ LINE does not bill Reply API calls, but each Push API call counts against the ch
 
 When your bot answers an inbound message, the adapter sends that first reply through the Reply API. Later sends use the Push API, because a reply token works once and expires within a minute. You don't need to change any adapter code.
 
+### Posting LINE-native messages
+
+The Chat SDK's `PostableMessage` type does not know about LINE's extra fields, so wrap LINE-native postables in `linePostable()` when calling `thread.post()`. The helper only narrows the static type. The adapter accepts these shapes at runtime either way.
+
+### Audio messages
+
+Pass an `audio` object with an HTTPS URL and the length in milliseconds to send a native LINE audio message:
+
+```typescript
+import { linePostable } from "chat-adapter-line";
+
+await thread.post(
+  linePostable({
+    audio: {
+      originalContentUrl: "https://example.com/audio.m4a",
+      duration: 12_000,
+    },
+  })
+);
+```
+
+The URL must be HTTPS and at most 2000 characters, and the duration a positive integer. Audio uses the same reply-first, push-fallback delivery as text.
+
 ### Broadcast and multicast
 
 `broadcastMessages()` sends to every follower of the channel and `multicastMessages()` sends to up to 500 user IDs. Both accept a single postable or an array of up to five, reuse the same conversion as `postMessage()`, and never consume a reply token:

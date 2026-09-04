@@ -1606,4 +1606,130 @@ describe("LineAdapter", () => {
       ).rejects.toBeInstanceOf(AdapterRateLimitError);
     });
   });
+
+  describe("postMessage LINE-native postables", () => {
+    beforeEach(async () => {
+      await adapter.initialize({
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+      } as never);
+      mocks.pushMessage.mockResolvedValue({
+        sentMessages: [{ id: "pushed-1" }],
+      });
+      mocks.replyMessage.mockResolvedValue({
+        sentMessages: [{ id: "replied-1" }],
+      });
+    });
+
+    const audio = {
+      duration: 12_000,
+      originalContentUrl: "https://example.com/audio.m4a",
+    };
+
+    it("sends a native audio message via push", async () => {
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        audio,
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [
+          {
+            duration: 12_000,
+            originalContentUrl: "https://example.com/audio.m4a",
+            type: "audio",
+          },
+        ],
+        to: "u-123",
+      });
+      expect(result.id).toBe("pushed-1");
+      expect(result.raw.type === "message" && result.raw.message.type).toBe(
+        "audio"
+      );
+    });
+
+    it("sends a native audio message via reply when a token is available", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        audio,
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ ...audio, type: "audio" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(result.id).toBe("replied-1");
+    });
+
+    it("falls back to push for audio when the reply token is rejected", async () => {
+      await seedReplyToken(adapter, { replyToken: "stale-reply-token" });
+      mocks.replyMessage.mockRejectedValueOnce(makeReplyTokenError());
+
+      await adapter.postMessage("line:bot-123:user:u-123", { audio });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ ...audio, type: "audio" }],
+        to: "u-123",
+      });
+    });
+
+    it.each([
+      [
+        "http URL",
+        { ...audio, originalContentUrl: "http://example.com/a.m4a" },
+      ],
+      ["empty URL", { ...audio, originalContentUrl: "" }],
+      ["non-URL", { ...audio, originalContentUrl: "not a url" }],
+      ["zero duration", { ...audio, duration: 0 }],
+      ["negative duration", { ...audio, duration: -1 }],
+      ["fractional duration", { ...audio, duration: 1.5 }],
+      ["infinite duration", { ...audio, duration: Number.POSITIVE_INFINITY }],
+      ["NaN duration", { ...audio, duration: Number.NaN }],
+    ])("rejects audio with %s before calling LINE", async (_label, bad) => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { audio: bad })
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+    });
+
+    it("propagates provider failures for audio sends", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { audio })
+      ).rejects.toThrow("LINE is down");
+    });
+
+    it("maps a 429 on an audio send to AdapterRateLimitError", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(makeRateLimitError(3));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { audio })
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
+    });
+
+    it("broadcasts audio alongside text", async () => {
+      mocks.broadcastWithHttpInfo.mockResolvedValue(acceptedResponse("req-a"));
+
+      const result = await adapter.broadcastMessages(["Listen", { audio }]);
+
+      expect(mocks.broadcastWithHttpInfo).toHaveBeenCalledWith(
+        {
+          messages: [
+            { text: "Listen", type: "text" },
+            { ...audio, type: "audio" },
+          ],
+        },
+        undefined
+      );
+      expect(result.messageCount).toBe(2);
+    });
+  });
 });

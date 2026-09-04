@@ -5,6 +5,7 @@ import { LineFormatConverter } from "../../src/lib/format-converter.js";
 import {
   MAX_MESSAGES_PER_REQUEST,
   MAX_MULTICAST_RECIPIENTS,
+  linePostable,
   toBatchLineMessages,
   toLineMessages,
   validateAggregationUnits,
@@ -53,6 +54,40 @@ describe("toLineMessages", () => {
     );
 
     expect(message).toMatchObject({ altText: "Card", type: "flex" });
+  });
+
+  it("converts audio to a native audio message", () => {
+    expect(
+      toLineMessages(
+        {
+          audio: {
+            duration: 5000,
+            originalContentUrl: "https://cdn.example.com/a.m4a",
+          },
+        },
+        converter
+      )
+    ).toEqual([
+      {
+        duration: 5000,
+        originalContentUrl: "https://cdn.example.com/a.m4a",
+        type: "audio",
+      },
+    ]);
+  });
+
+  it("rejects an audio URL longer than 2000 characters", () => {
+    const originalContentUrl = `https://example.com/${"a".repeat(2000)}`;
+
+    expect(() =>
+      toLineMessages({ audio: { duration: 1, originalContentUrl } }, converter)
+    ).toThrow(/2000 characters/);
+  });
+
+  it("rejects audio that is not an object", () => {
+    expect(() =>
+      toLineMessages({ audio: "https://x" } as never, converter)
+    ).toThrow(ValidationError);
   });
 
   it("throws when there is no content", () => {
@@ -171,5 +206,15 @@ describe("validateMulticastRecipients", () => {
     expect(() => validateMulticastRecipients([userId, "" as never])).toThrow(
       ValidationError
     );
+  });
+});
+
+describe("linePostable", () => {
+  it("returns the same object so the adapter sees the LINE fields", () => {
+    const postable = {
+      audio: { duration: 1, originalContentUrl: "https://x/a.m4a" },
+    };
+
+    expect(linePostable(postable)).toBe(postable);
   });
 });

@@ -2,6 +2,7 @@ import { extractCard, ValidationError } from "@chat-adapter/shared";
 import type { messagingApi } from "@line/bot-sdk";
 import type { AdapterPostableMessage, Root } from "chat";
 
+import type { LinePostableMessage } from "../types.js";
 import { buildFlexMessage } from "./flex-messages.js";
 import type { LineFormatConverter } from "./format-converter.js";
 import { isRecord } from "./is-record.js";
@@ -12,6 +13,9 @@ export const MAX_MESSAGES_PER_REQUEST = 5;
 
 /** LINE multicast accepts at most 500 user IDs per request. */
 export const MAX_MULTICAST_RECIPIENTS = 500;
+
+/** LINE caps media URLs at 2000 characters. */
+const MAX_CONTENT_URL_LENGTH = 2000;
 
 /** LINE multicast accepts one aggregation unit: up to 30 alphanumerics or underscores. */
 const MAX_AGGREGATION_UNITS = 1;
@@ -24,13 +28,56 @@ const LINE_USER_ID_PATTERN = /^U[0-9a-f]{32}$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const isHttpsUrl = (value: string): boolean => {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const buildAudioMessage = (audio: unknown): messagingApi.AudioMessage => {
+  if (!isRecord(audio)) {
+    throw new ValidationError("line", "audio must be an object");
+  }
+
+  const { originalContentUrl, duration } = audio;
+
+  if (
+    typeof originalContentUrl !== "string" ||
+    !isHttpsUrl(originalContentUrl)
+  ) {
+    throw new ValidationError(
+      "line",
+      "audio.originalContentUrl must be an HTTPS URL"
+    );
+  }
+
+  if (originalContentUrl.length > MAX_CONTENT_URL_LENGTH) {
+    throw new ValidationError(
+      "line",
+      `audio.originalContentUrl must be at most ${MAX_CONTENT_URL_LENGTH} characters`
+    );
+  }
+
+  if (!Number.isInteger(duration) || (duration as number) <= 0) {
+    throw new ValidationError(
+      "line",
+      "audio.duration must be a positive integer number of milliseconds"
+    );
+  }
+
+  return { duration: duration as number, originalContentUrl, type: "audio" };
+};
+
 /**
  * Converts one postable into LINE Messaging API message objects.
  *
- * Cards become Flex Messages and everything else renders to text.
+ * Cards become Flex Messages, audio becomes a native audio message, and
+ * everything else renders to text.
  */
 export const toLineMessages = (
-  message: AdapterPostableMessage,
+  message: LinePostableMessage,
   converter: LineFormatConverter
 ): messagingApi.Message[] => {
   if (typeof message === "string") {
@@ -41,9 +88,13 @@ export const toLineMessages = (
     throw new ValidationError("line", "No message content to send");
   }
 
-  const card = extractCard(message);
+  const card = extractCard(message as AdapterPostableMessage);
   if (card) {
     return [buildFlexMessage(card)];
+  }
+
+  if ("audio" in message) {
+    return [buildAudioMessage(message.audio)];
   }
 
   if (typeof message.text === "string") {
@@ -55,7 +106,10 @@ export const toLineMessages = (
   }
 
   if (typeof message.markdown === "string") {
-    return [{ text: converter.renderPostable(message), type: "text" }];
+    const rendered = converter.renderPostable(
+      message as AdapterPostableMessage
+    );
+    return [{ text: rendered, type: "text" }];
   }
 
   if (message.ast) {
@@ -72,7 +126,7 @@ export const toLineMessages = (
  * message would silently reach the whole audience incomplete.
  */
 export const toBatchLineMessages = (
-  messages: AdapterPostableMessage | AdapterPostableMessage[],
+  messages: LinePostableMessage | LinePostableMessage[],
   converter: LineFormatConverter
 ): messagingApi.Message[] => {
   const postables = Array.isArray(messages) ? messages : [messages];
@@ -151,3 +205,20 @@ export const validateMulticastRecipients = (userIds: string[]): void => {
     }
   }
 };
+
+/**
+ * Types a LINE-native postable for `thread.post()`.
+ *
+ * The Chat SDK's `PostableMessage` union does not know about `audio`, so
+ * passing one as an object literal fails TypeScript's excess property check.
+ * The adapter accepts the wider `LinePostableMessage` at runtime; this helper
+ * only narrows the static type.
+ *
+ * @example
+ * ```ts
+ * await thread.post(linePostable({ audio: { originalContentUrl, duration } }));
+ * ```
+ */
+export const linePostable = (
+  message: LinePostableMessage
+): AdapterPostableMessage => message as AdapterPostableMessage;

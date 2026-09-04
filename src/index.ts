@@ -64,6 +64,8 @@ export type {
   LineEvent,
   LineMessageEvent,
   LineMulticastOptions,
+  LinePostableAudio,
+  LinePostableMessage,
   LinePostbackEvent,
   LineRawMessage,
   LineThreadId,
@@ -76,4 +78,4 @@ export {
   deserializePostbackData,
   serializePostbackData,
 } from "./lib/flex-messages.js";
-export { toLineMessages } from "./lib/outbound.js";
+export { linePostable, toLineMessages } from "./lib/outbound.js";

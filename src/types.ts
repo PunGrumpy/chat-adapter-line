@@ -87,6 +87,34 @@ export interface LineWebhookPayload {
   events: (LineEvent | Record<string, unknown>)[];
 }
 
+/** Options for `LineAdapter.broadcastMessages`. */
+export interface LineBroadcastOptions {
+  /**
+   * Idempotency key forwarded as `X-Line-Retry-Key`. Must be a UUID. Reuse
+   * the same key when retrying a request whose outcome is unknown so LINE
+   * does not deliver it twice.
+   */
+  retryKey?: string;
+  /** Deliver silently, without a push notification. */
+  notificationDisabled?: boolean;
+}
+
+/** Options for `LineAdapter.multicastMessages`. */
+export interface LineMulticastOptions extends LineBroadcastOptions {
+  /** Aggregation unit name for LINE's per-unit statistics. At most one. */
+  customAggregationUnits?: string[];
+}
+
+/** Result of a broadcast or multicast submission. */
+export interface LineBatchSendResult {
+  /** LINE's `X-Line-Request-Id` for the accepted request, when returned. */
+  requestId?: string;
+  /** Number of LINE message objects submitted. */
+  messageCount: number;
+  /** Number of recipients addressed. Only set for multicast. */
+  recipientCount?: number;
+}
+
 /** Response from LINE send message API */
 export interface LineRawMessage {
   sentMessages: {

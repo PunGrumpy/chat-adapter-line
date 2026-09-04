@@ -3,7 +3,6 @@ import crypto from "node:crypto";
 
 import {
   AdapterRateLimitError,
-  extractCard,
   extractFiles,
   PermissionError,
   ValidationError,
@@ -22,39 +21,41 @@ import type {
   FormattedContent,
   Logger,
   RawMessage,
-  Root,
   StreamChunk,
   StreamOptions,
   ThreadInfo,
   WebhookOptions,
 } from "chat";
-import {
-  BaseFormatConverter,
-  ConsoleLogger,
-  Message,
-  parseMarkdown,
-  stringifyMarkdown,
-} from "chat";
+import { ConsoleLogger, Message } from "chat";
 
+import { deserializePostbackData } from "./lib/flex-messages.js";
+import { LineFormatConverter } from "./lib/format-converter.js";
 import {
-  buildFlexMessage,
-  deserializePostbackData,
-} from "./lib/flex-messages.js";
+  toBatchLineMessages,
+  toLineMessages,
+  validateAggregationUnits,
+  validateMulticastRecipients,
+  validateRetryKey,
+} from "./lib/outbound.js";
 import { ReplyTokenStore } from "./lib/reply-token-store.js";
 import {
   decodeThreadId,
   encodeThreadId,
   isDM as isDMThreadId,
 } from "./lib/thread-id.js";
-import { toPlainText } from "./lib/to-plain-text.js";
 import type {
   LineAdapterConfig,
+  LineBatchSendResult,
+  LineBroadcastOptions,
   LineEvent,
   LineMessageEvent,
+  LineMulticastOptions,
   LinePostbackEvent,
   LineThreadId,
   LineWebhookPayload,
 } from "./types.js";
+
+export { LineFormatConverter } from "./lib/format-converter.js";
 
 const VALID_ATTACHMENT_TYPES: ReadonlySet<string> = new Set([
   "image",
@@ -183,20 +184,10 @@ const extractStreamText = (chunk: string | StreamChunk): string => {
   return "";
 };
 
-export class LineFormatConverter extends BaseFormatConverter {
-  toAst(platformText: string): Root {
-    return parseMarkdown(platformText);
-  }
-
-  fromAst(ast: Root): string {
-    return stringifyMarkdown(ast);
-  }
-
-  override renderPostable(message: AdapterPostableMessage): string {
-    const rendered = super.renderPostable(message);
-    return toPlainText(rendered);
-  }
-}
+const readRequestId = (response: {
+  httpResponse: Response;
+}): string | undefined =>
+  response.httpResponse.headers.get("x-line-request-id") ?? undefined;
 
 export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   readonly name = "line";
@@ -445,41 +436,93 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   ): Promise<RawMessage<LineEvent>> {
     const { sourceId } = this.decodeThreadId(threadId);
 
-    const card = extractCard(message);
     const files = extractFiles(message);
-
     if (files.length > 0) {
       this.logger.warn("File attachments are not directly supported in LINE", {
         count: files.length,
       });
     }
 
-    const lineMessages: messagingApi.Message[] = [];
+    const lineMessages = toLineMessages(message, this.converter);
 
-    if (card) {
-      const flexMessage = buildFlexMessage(card);
-      lineMessages.push(flexMessage);
-    } else if (typeof message === "string") {
-      lineMessages.push({ text: message, type: "text" });
-    } else if ("text" in message && typeof message.text === "string") {
-      lineMessages.push({ text: message.text, type: "text" });
-    } else if ("markdown" in message && typeof message.markdown === "string") {
-      const rendered = this.converter.renderPostable(message);
-      lineMessages.push({ text: rendered, type: "text" });
-    } else if ("ast" in message && message.ast) {
-      const rendered = this.converter.fromAst(message.ast);
-      lineMessages.push({ text: toPlainText(rendered), type: "text" });
-    }
-
-    if (lineMessages.length === 0) {
-      throw new ValidationError("line", "No message content to send");
-    }
-
-    const messagesToSend = lineMessages.slice(0, 5);
-
-    const result = await this.sendMessages(threadId, sourceId, messagesToSend);
+    const result = await this.sendMessages(threadId, sourceId, lineMessages);
 
     return this.buildRawMessage(result, "", threadId);
+  }
+
+  /**
+   * Sends messages to every user who follows the channel through LINE's
+   * broadcast endpoint. This never touches reply tokens or the push
+   * fallback, so it cannot consume a pending reply.
+   *
+   * Pass the same `retryKey` when you retry a request whose outcome is
+   * unknown; LINE then deduplicates delivery instead of sending twice.
+   */
+  async broadcastMessages(
+    messages: AdapterPostableMessage | AdapterPostableMessage[],
+    options: LineBroadcastOptions = {}
+  ): Promise<LineBatchSendResult> {
+    validateRetryKey(options.retryKey);
+    const lineMessages = toBatchLineMessages(messages, this.converter);
+
+    const response = await this.callLine(() =>
+      this.client.broadcastWithHttpInfo(
+        {
+          messages: lineMessages,
+          notificationDisabled: options.notificationDisabled,
+        },
+        options.retryKey
+      )
+    );
+
+    const requestId = readRequestId(response);
+    this.logger.debug("Sent broadcast", {
+      messageCount: lineMessages.length,
+      requestId,
+    });
+
+    return { messageCount: lineMessages.length, requestId };
+  }
+
+  /**
+   * Sends messages to up to 500 LINE user IDs through LINE's multicast
+   * endpoint. Like `broadcastMessages`, this bypasses reply tokens and the
+   * reply/push path entirely.
+   */
+  async multicastMessages(
+    userIds: string[],
+    messages: AdapterPostableMessage | AdapterPostableMessage[],
+    options: LineMulticastOptions = {}
+  ): Promise<LineBatchSendResult> {
+    validateRetryKey(options.retryKey);
+    validateMulticastRecipients(userIds);
+    validateAggregationUnits(options.customAggregationUnits);
+    const lineMessages = toBatchLineMessages(messages, this.converter);
+
+    const response = await this.callLine(() =>
+      this.client.multicastWithHttpInfo(
+        {
+          customAggregationUnits: options.customAggregationUnits,
+          messages: lineMessages,
+          notificationDisabled: options.notificationDisabled,
+          to: userIds,
+        },
+        options.retryKey
+      )
+    );
+
+    const requestId = readRequestId(response);
+    this.logger.debug("Sent multicast", {
+      messageCount: lineMessages.length,
+      recipientCount: userIds.length,
+      requestId,
+    });
+
+    return {
+      messageCount: lineMessages.length,
+      recipientCount: userIds.length,
+      requestId,
+    };
   }
 
   /**

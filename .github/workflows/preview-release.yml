@@ -1,0 +1,56 @@
+name: Preview Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  # Keyed by PR number rather than head_ref: two fork PRs can share a branch
+  # name, and a name-keyed group would let one push cancel an unrelated run.
+  group: preview-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish Preview
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'PunGrumpy'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Setup Bun cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - name: Install dependencies
+        run: bun install
+      - name: Build
+        run: bun run build
+      - name: Publish preview to pkg.pr.new
+        run: |
+          max_attempts=4
+          for attempt in $(seq 1 "$max_attempts"); do
+            if bun x pkg-pr-new publish; then
+              exit 0
+            fi
+
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              exit 1
+            fi
+
+            delay=$((2 ** attempt))
+            echo "pkg-pr-new publish failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s..."
+            sleep "$delay"
+          done

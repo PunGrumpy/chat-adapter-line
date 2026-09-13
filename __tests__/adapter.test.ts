@@ -902,6 +902,47 @@ describe("LineAdapter", () => {
       expect(result.id).toBe("sent-1");
       expect(result.threadId).toBe("line:bot-123:user:u-123");
     });
+
+    it("pushes a flex postable verbatim and returns the sent ID", async () => {
+      const contents = {
+        body: {
+          contents: [{ text: "Hi", type: "text" }],
+          layout: "vertical",
+          type: "box",
+        },
+        type: "bubble",
+      };
+
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        flex: { altText: "Bubble", contents },
+      } as never);
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ altText: "Bubble", contents, type: "flex" }],
+        to: "u-123",
+      });
+      expect(result.id).toBe("sent-1");
+    });
+
+    it("rejects a flex postable with a blank altText before calling LINE", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          flex: { altText: "  ", contents: { type: "bubble" } },
+        } as never)
+      ).rejects.toThrow(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("propagates a provider failure on a flex send", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          flex: { altText: "Bubble", contents: { type: "bubble" } },
+        } as never)
+      ).rejects.toThrow("LINE is down");
+    });
   });
 
   describe("reply-first sending", () => {
@@ -949,6 +990,38 @@ describe("LineAdapter", () => {
       });
       expect(mocks.pushMessage).not.toHaveBeenCalled();
       expect(result.id).toBe("replied-1");
+    });
+
+    it("replies with a flex postable when a reply token is available", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+      const contents = { contents: [], type: "carousel" };
+
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        flex: { altText: "Carousel", contents },
+      } as never);
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ altText: "Carousel", contents, type: "flex" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(result.id).toBe("replied-1");
+    });
+
+    it("falls back to push for a flex postable when the reply token is rejected", async () => {
+      await seedReplyToken(adapter, { replyToken: "stale-reply-token" });
+      mocks.replyMessage.mockRejectedValueOnce(makeReplyTokenError());
+      const contents = { type: "bubble" };
+
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        flex: { altText: "Bubble", contents },
+      } as never);
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ altText: "Bubble", contents, type: "flex" }],
+        to: "u-123",
+      });
+      expect(result.id).toBe("pushed-1");
     });
 
     it("consumes the reply token after one send", async () => {

@@ -3,7 +3,7 @@ import type { messagingApi } from "@line/bot-sdk";
 import type { AdapterPostableMessage, Root } from "chat";
 
 import type { LinePostableMessage, LineTextOptions } from "../types.js";
-import { buildFlexMessage } from "./flex-messages.js";
+import { buildFlexMessage, buildNativeFlexMessage } from "./flex-messages.js";
 import type { LineFormatConverter } from "./format-converter.js";
 import { isRecord } from "./is-record.js";
 import { buildTextMessage } from "./mentions.js";
@@ -115,8 +115,8 @@ const buildAudioMessage = (audio: unknown): messagingApi.AudioMessage => {
 /**
  * Converts one postable into LINE Messaging API message objects.
  *
- * Cards become Flex Messages, audio becomes a native audio message, and
- * everything else renders to text. Quote tokens and mentions are only
+ * Cards and `flex` payloads become Flex Messages, audio becomes a native
+ * audio message, and everything else renders to text. Quote tokens and mentions are only
  * accepted where LINE can carry them; other combinations throw instead of
  * silently dropping the LINE-specific data.
  */
@@ -133,6 +133,12 @@ export const toLineMessages = (
   }
 
   const options = readTextOptions(message);
+
+  if ("flex" in message) {
+    rejectQuote(options, "flex");
+    rejectMentions(options, "flex");
+    return [buildNativeFlexMessage(message.flex)];
+  }
 
   const card = extractCard(message as AdapterPostableMessage);
   if (card) {

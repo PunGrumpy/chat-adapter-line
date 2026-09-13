@@ -2,12 +2,16 @@ import { ValidationError } from "@chat-adapter/shared";
 import type { messagingApi } from "@line/bot-sdk";
 import type { ButtonElement, CardElement } from "chat";
 
+import { isRecord } from "./is-record.js";
+
 /** LINE caps postback `data` at 300 characters. */
 const MAX_POSTBACK_DATA_LENGTH = 300;
 /** LINE caps button labels at 20 characters. */
 const MAX_BUTTON_LABEL_LENGTH = 20;
 /** LINE caps display text on postback actions at 300 characters. */
 const MAX_ACTION_DISPLAY_TEXT_LENGTH = 300;
+/** LINE caps Flex Message `altText` at 400 characters. */
+const MAX_ALT_TEXT_LENGTH = 400;
 
 /**
  * Serializes a button ID and value into a URL-encoded string.
@@ -167,6 +171,53 @@ export const buildFlexMessage = (
   return {
     altText: card.title || "Flex Message",
     contents: bubble,
+    type: "flex",
+  };
+};
+
+/**
+ * Wraps a caller-supplied Flex payload in a LINE Flex Message.
+ *
+ * This checks the envelope only. `contents` passes through untouched, because
+ * LINE validates the component tree itself and the payload producer knows
+ * which schema level it targets.
+ */
+export const buildNativeFlexMessage = (
+  flex: unknown
+): messagingApi.FlexMessage => {
+  if (!isRecord(flex)) {
+    throw new ValidationError("line", "flex must be an object");
+  }
+
+  const { altText, contents } = flex;
+
+  if (typeof altText !== "string" || altText.trim() === "") {
+    throw new ValidationError(
+      "line",
+      "flex.altText must be a non-empty string"
+    );
+  }
+
+  if (altText.length > MAX_ALT_TEXT_LENGTH) {
+    throw new ValidationError(
+      "line",
+      `flex.altText must be at most ${MAX_ALT_TEXT_LENGTH} characters`
+    );
+  }
+
+  if (
+    !isRecord(contents) ||
+    (contents.type !== "bubble" && contents.type !== "carousel")
+  ) {
+    throw new ValidationError(
+      "line",
+      'flex.contents must be a Flex container with type "bubble" or "carousel"'
+    );
+  }
+
+  return {
+    altText,
+    contents: contents as messagingApi.FlexContainer,
     type: "flex",
   };
 };

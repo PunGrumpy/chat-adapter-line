@@ -69,6 +69,7 @@ export type {
   LineMessageEvent,
   LineMulticastOptions,
   LinePostableAudio,
+  LinePostableFlex,
   LinePostableMessage,
   LinePostableText,
   LinePostbackEvent,
@@ -81,6 +82,7 @@ export { decodeThreadId, encodeThreadId, isDM } from "./lib/thread-id.js";
 export { toPlainText } from "./lib/to-plain-text.js";
 export {
   buildFlexMessage,
+  buildNativeFlexMessage,
   deserializePostbackData,
   serializePostbackData,
 } from "./lib/flex-messages.js";

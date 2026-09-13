@@ -56,6 +56,34 @@ describe("toLineMessages", () => {
     expect(message).toMatchObject({ altText: "Card", type: "flex" });
   });
 
+  it("converts a flex postable to a flex message", () => {
+    const contents = {
+      body: { contents: [], layout: "vertical", type: "box" },
+      type: "bubble",
+    };
+
+    expect(
+      toLineMessages(
+        { flex: { altText: "Bubble", contents } } as never,
+        converter
+      )
+    ).toEqual([{ altText: "Bubble", contents, type: "flex" }]);
+  });
+
+  it("rejects quote tokens and mentions on a flex postable", () => {
+    const flex = { altText: "Bubble", contents: { type: "bubble" } };
+
+    expect(() =>
+      toLineMessages({ flex, quoteToken: "q" } as never, converter)
+    ).toThrow(ValidationError);
+    expect(() =>
+      toLineMessages(
+        { flex, mentions: [{ index: 0, length: 1, userId: "u" }] } as never,
+        converter
+      )
+    ).toThrow(ValidationError);
+  });
+
   it("converts audio to a native audio message", () => {
     expect(
       toLineMessages(

@@ -1,6 +1,6 @@
 # Chat SDK LINE adapter
 
-[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, quotes, audio, and batch messages back.
+[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, quotes, Flex Messages, audio, and batch messages back.
 
 ## Install the package
 
@@ -122,6 +122,54 @@ await thread.post(
 ```
 
 The adapter encodes these as a LINE text message v2 with mention substitutions. Passing `mentions` on a Markdown, AST, card, or audio postable, in a 1:1 chat, or in a broadcast or multicast throws a `ValidationError`.
+
+### Flex Messages
+
+A Chat SDK `card` element renders as a single bubble. A `flex` postable covers the rest of the Flex schema, including hero images, carousels, URI and datetime-picker actions, colors, and custom layout. The adapter sends `contents` to LINE untouched:
+
+```typescript
+await thread.post(
+  linePostable({
+    flex: {
+      altText: "Your order shipped",
+      contents: {
+        type: "bubble",
+        hero: {
+          type: "image",
+          url: "https://example.com/box.png",
+          size: "full",
+        },
+        body: {
+          type: "box",
+          layout: "vertical",
+          contents: [{ type: "text", text: "Arriving Friday", weight: "bold" }],
+        },
+        footer: {
+          type: "box",
+          layout: "vertical",
+          contents: [
+            {
+              type: "button",
+              style: "primary",
+              action: {
+                type: "uri",
+                label: "Track",
+                uri: "https://example.com/track/1",
+              },
+            },
+          ],
+        },
+      },
+    },
+  })
+);
+```
+
+`contents` takes a `bubble` or a `carousel`. `altText` is required and must not be blank. LINE caps it at 400 characters and shows it in notifications and the chat list.
+
+The adapter checks the envelope only. LINE validates the component tree itself, and you know which schema level your payload targets.
+
+Like cards, Flex Messages cannot carry a `quoteToken` or `mentions`. Both combinations throw a `ValidationError`. Delivery uses the same reply-first, push-fallback path as text, and `broadcastMessages()` and `multicastMessages()` accept `flex` postables too.
 
 ### Audio messages
 

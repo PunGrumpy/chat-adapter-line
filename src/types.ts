@@ -1,3 +1,4 @@
+import type { messagingApi } from "@line/bot-sdk";
 import type {
   AdapterPostableMessage,
   Logger,
@@ -162,6 +163,22 @@ export interface LinePostableAudio {
 }
 
 /**
+ * Native LINE Flex Message.
+ *
+ * The adapter sends `contents` to LINE untouched, so this shape covers the
+ * parts of the Flex schema the Chat SDK `card` model cannot express: hero
+ * images, carousels, URI and datetime-picker actions, colors, and layout.
+ */
+export interface LinePostableFlex {
+  flex: {
+    /** Notification and chat-list text. Required, and at most 400 characters. */
+    altText: string;
+    /** A `bubble` or `carousel` container. */
+    contents: messagingApi.FlexContainer;
+  };
+}
+
+/**
  * Everything `LineAdapter.postMessage` accepts: the Chat SDK postables plus
  * LINE-native shapes.
  *
@@ -173,6 +190,7 @@ export type LinePostableMessage =
   | AdapterPostableMessage
   | LinePostableText
   | LinePostableAudio
+  | LinePostableFlex
   | (PostableRaw & LineTextOptions)
   | (PostableMarkdown & Pick<LineTextOptions, "quoteToken">)
   | (PostableAst & Pick<LineTextOptions, "quoteToken">);

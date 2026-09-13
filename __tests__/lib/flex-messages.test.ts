@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildFlexMessage,
+  buildNativeFlexMessage,
   deserializePostbackData,
   serializePostbackData,
 } from "../../src/lib/flex-messages.js";
@@ -91,6 +92,95 @@ describe("Flex Messages Utility", () => {
         (contents.footer.contents[0] as { action: { data: string } }).action
           .data
       ).toBe("id=btn-1&v=val-1");
+    });
+  });
+  describe("buildNativeFlexMessage", () => {
+    const bubble = {
+      body: {
+        contents: [{ text: "Hello", type: "text" }],
+        layout: "vertical",
+        type: "box",
+      },
+      hero: {
+        aspectRatio: "20:13",
+        size: "full",
+        type: "image",
+        url: "https://example.com/hero.png",
+      },
+      type: "bubble",
+    };
+
+    it("wraps a bubble container without touching its contents", () => {
+      const message = buildNativeFlexMessage({
+        altText: "A bubble",
+        contents: bubble,
+      });
+
+      expect(message).toEqual({
+        altText: "A bubble",
+        contents: bubble,
+        type: "flex",
+      });
+      expect(message.contents).toBe(bubble);
+    });
+
+    it("wraps a carousel container", () => {
+      const carousel = { contents: [bubble, bubble], type: "carousel" };
+
+      const message = buildNativeFlexMessage({
+        altText: "Two bubbles",
+        contents: carousel,
+      });
+
+      expect(message).toEqual({
+        altText: "Two bubbles",
+        contents: carousel,
+        type: "flex",
+      });
+    });
+
+    it("rejects a missing, empty, or whitespace-only altText", () => {
+      expect(() => buildNativeFlexMessage({ contents: bubble })).toThrow(
+        ValidationError
+      );
+      expect(() =>
+        buildNativeFlexMessage({ altText: "", contents: bubble })
+      ).toThrow(ValidationError);
+      expect(() =>
+        buildNativeFlexMessage({ altText: "   ", contents: bubble })
+      ).toThrow(ValidationError);
+      expect(() =>
+        buildNativeFlexMessage({ altText: 42, contents: bubble })
+      ).toThrow(ValidationError);
+    });
+
+    it("rejects an altText longer than 400 characters", () => {
+      expect(() =>
+        buildNativeFlexMessage({ altText: "a".repeat(401), contents: bubble })
+      ).toThrow(ValidationError);
+      expect(() =>
+        buildNativeFlexMessage({ altText: "a".repeat(400), contents: bubble })
+      ).not.toThrow();
+    });
+
+    it("rejects contents that are not a bubble or carousel", () => {
+      expect(() => buildNativeFlexMessage({ altText: "x" })).toThrow(
+        ValidationError
+      );
+      expect(() =>
+        buildNativeFlexMessage({ altText: "x", contents: "bubble" })
+      ).toThrow(ValidationError);
+      expect(() =>
+        buildNativeFlexMessage({
+          altText: "x",
+          contents: { layout: "vertical", type: "box" },
+        })
+      ).toThrow(ValidationError);
+    });
+
+    it("rejects a flex payload that is not an object", () => {
+      expect(() => buildNativeFlexMessage("bubble")).toThrow(ValidationError);
+      expect(() => buildNativeFlexMessage(null)).toThrow(ValidationError);
     });
   });
 });

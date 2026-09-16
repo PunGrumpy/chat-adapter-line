@@ -32,6 +32,7 @@ import { ConsoleLogger } from "chat";
 import { parseInboundEmojis } from "./lib/emojis.js";
 import { deserializePostbackData } from "./lib/flex-messages.js";
 import { LineFormatConverter } from "./lib/format-converter.js";
+import { isLifecycleEvent, toLifecycleEvent } from "./lib/lifecycle-events.js";
 import { parseInboundLocation } from "./lib/locations.js";
 import { parseInboundMentions } from "./lib/mentions.js";
 import {
@@ -48,6 +49,7 @@ import {
   decodeThreadId,
   encodeThreadId,
   isDM as isDMThreadId,
+  sourceIdFrom,
 } from "./lib/thread-id.js";
 import { LineMessage } from "./message.js";
 import type {
@@ -55,6 +57,9 @@ import type {
   LineBatchSendResult,
   LineBroadcastOptions,
   LineEvent,
+  LineLifecycleEvent,
+  LineLifecycleHandler,
+  LineLifecycleRawEvent,
   LineMessageEvent,
   LineMulticastOptions,
   LinePostableMessage,
@@ -93,17 +98,6 @@ const verifySignature = (
     .digest("base64");
 
   return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(hash));
-};
-
-const getSourceIdFromEvent = (event: LineEvent): string | undefined => {
-  const { source } = event;
-  if (source.type === "user") {
-    return source.userId;
-  }
-  if (source.type === "group") {
-    return source.groupId;
-  }
-  return source.roomId;
 };
 
 const readableToBuffer = async (
@@ -219,6 +213,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   >();
   private lastTypingTime = new Map<string, number>();
   private replyTokens = new ReplyTokenStore();
+  private lifecycleHandlers = new Set<LineLifecycleHandler>();
 
   constructor(config: LineAdapterConfig) {
     this.client = LineBotClient.fromChannelAccessToken({
@@ -292,14 +287,22 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return new Response("Invalid JSON", { status: 400 });
     }
 
-    if (!this.chat || !payload.events) {
+    if (!payload.events) {
       return new Response("OK", { status: 200 });
     }
 
     const channelId = this.channelId ?? payload.destination;
 
     for (const event of payload.events) {
+      if (isLifecycleEvent(event)) {
+        this.dispatchLifecycleEvent(event, channelId);
+        continue;
+      }
+
       if (!isLineEvent(event)) {
+        continue;
+      }
+      if (!this.chat) {
         continue;
       }
       if (event.mode !== "active") {
@@ -312,7 +315,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         continue;
       }
 
-      const sourceId = getSourceIdFromEvent(event);
+      const sourceId = sourceIdFrom(event.source);
       if (!sourceId) {
         continue;
       }
@@ -328,7 +331,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
           const factory = (): Promise<Message<LineEvent>> =>
             Promise.resolve(this.parseMessage(event));
 
-          this.chat.processMessage(this, threadId, factory, options);
+          this.chat?.processMessage(this, threadId, factory, options);
         }
       } catch (error) {
         this.logger.error("processMessage failed", {
@@ -339,6 +342,85 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     }
 
     return new Response("OK", { status: 200 });
+  }
+
+  /**
+   * Registers a handler for LINE lifecycle events: `follow`, `unfollow`,
+   * `join`, `leave`, `memberJoined`, and `memberLeft`.
+   *
+   * Every registered handler sees every event, and the returned function
+   * unregisters this one. A handler that throws or rejects is logged and
+   * does not stop the others or change the webhook response.
+   *
+   * @example
+   * ```ts
+   * const stop = adapter.onLifecycleEvent((event) => {
+   *   if (event.type === "follow") {
+   *     console.log("new friend", event.userId);
+   *   }
+   * });
+   * ```
+   */
+  onLifecycleEvent(handler: LineLifecycleHandler): () => void {
+    this.lifecycleHandlers.add(handler);
+    return () => {
+      this.lifecycleHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Hands one lifecycle event to every registered handler.
+   *
+   * Unlike message events, a redelivered or standby-mode lifecycle event is
+   * still delivered, because a missed `unfollow` cannot be recovered the way
+   * a missed message can be resent. Both facts ride on the event, so a
+   * handler can filter on `isRedelivery` and `mode`, and deduplicate on
+   * `webhookEventId`.
+   *
+   * LINE issues a reply token with `follow`, `join`, and `memberJoined`, so
+   * those are stored for the reply-first path whether or not anything is
+   * listening. Welcoming a new follower then costs no message quota.
+   */
+  private dispatchLifecycleEvent(
+    event: LineLifecycleRawEvent,
+    channelId: string
+  ): void {
+    const sourceId = sourceIdFrom(event.source);
+    if (!sourceId) {
+      return;
+    }
+
+    const threadId = encodeThreadId(event.source.type, channelId, sourceId);
+    const lifecycle = toLifecycleEvent(event, threadId, sourceId);
+
+    if (
+      lifecycle.replyToken !== undefined &&
+      !DUMMY_REPLY_TOKEN_PATTERN.test(lifecycle.replyToken)
+    ) {
+      this.replyTokens.set(threadId, lifecycle.replyToken);
+    }
+
+    for (const handler of this.lifecycleHandlers) {
+      // Deliberately not awaited: LINE expects the webhook to be
+      // acknowledged promptly, so a slow handler must not hold up the 200.
+      void this.runLifecycleHandler(handler, lifecycle);
+    }
+  }
+
+  /** Runs one handler, swallowing its failure so the others still run. */
+  private async runLifecycleHandler(
+    handler: LineLifecycleHandler,
+    event: LineLifecycleEvent
+  ): Promise<void> {
+    try {
+      await handler(event);
+    } catch (error) {
+      this.logger.error("Lifecycle handler failed", {
+        error,
+        threadId: event.threadId,
+        type: event.type,
+      });
+    }
   }
 
   /**
@@ -382,7 +464,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   }
 
   parseMessage(raw: LineMessageEvent): LineMessage {
-    const sourceId = getSourceIdFromEvent(raw);
+    const sourceId = sourceIdFrom(raw.source);
 
     if (!this.channelId) {
       throw new ValidationError(

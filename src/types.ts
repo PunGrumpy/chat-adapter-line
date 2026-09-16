@@ -100,6 +100,14 @@ export interface LineEmoji {
   emojiId: string;
 }
 
+/** Who a LINE webhook event came from. */
+export interface LineEventSource {
+  type: "user" | "group" | "room";
+  userId?: string;
+  groupId?: string;
+  roomId?: string;
+}
+
 /** Raw LINE webhook message event */
 export interface LineMessageEvent {
   type: "message";
@@ -137,12 +145,7 @@ export interface LineMessageEvent {
     };
   };
   timestamp: number;
-  source: {
-    type: "user" | "group" | "room";
-    userId?: string;
-    groupId?: string;
-    roomId?: string;
-  };
+  source: LineEventSource;
   replyToken: string;
   mode: "active" | "standby";
   webhookEventId: string;
@@ -163,12 +166,7 @@ export interface LinePostbackEvent {
     };
   };
   timestamp: number;
-  source: {
-    type: "user" | "group" | "room";
-    userId?: string;
-    groupId?: string;
-    roomId?: string;
-  };
+  source: LineEventSource;
   replyToken: string;
   mode: "active" | "standby";
   webhookEventId: string;
@@ -178,6 +176,75 @@ export interface LinePostbackEvent {
 }
 
 export type LineEvent = LineMessageEvent | LinePostbackEvent;
+
+/** The LINE webhook events that report a change in who the bot can reach. */
+export type LineLifecycleEventType =
+  | "follow"
+  | "unfollow"
+  | "join"
+  | "leave"
+  | "memberJoined"
+  | "memberLeft";
+
+/** Raw LINE webhook lifecycle event */
+export interface LineLifecycleRawEvent {
+  type: LineLifecycleEventType;
+  timestamp: number;
+  source: LineEventSource;
+  /** LINE issues one for `follow`, `join`, and `memberJoined` only. */
+  replyToken?: string;
+  mode: "active" | "standby";
+  webhookEventId: string;
+  deliveryContext: {
+    isRedelivery: boolean;
+  };
+  follow?: {
+    isUnblocked?: boolean;
+  };
+  joined?: {
+    members: LineEventSource[];
+  };
+  left?: {
+    members: LineEventSource[];
+  };
+}
+
+/**
+ * A LINE lifecycle webhook event, flattened onto one shape.
+ *
+ * These report who the bot can reach rather than what anyone said, so they
+ * never become messages and never reach the Chat SDK's message handlers.
+ */
+export interface LineLifecycleEvent {
+  type: LineLifecycleEventType;
+  /** Thread the event happened in, in the adapter's encoded form. */
+  threadId: string;
+  sourceType: "user" | "group" | "room";
+  /** The user, group, or room ID LINE named as the source. */
+  sourceId: string;
+  /** The acting user, when LINE identifies one. */
+  userId?: string;
+  /** When LINE recorded the event. */
+  timestamp: Date;
+  /** LINE's unique ID for this delivery. Deduplicate on it. */
+  webhookEventId: string;
+  mode: "active" | "standby";
+  /** True when LINE is redelivering an event it already sent. */
+  isRedelivery: boolean;
+  /** Reply token, on the events LINE issues one for. */
+  replyToken?: string;
+  /** Who joined or left, on `memberJoined` and `memberLeft`. */
+  members?: string[];
+  /** On `follow`, true when a user unblocked rather than added the bot. */
+  isUnblocked?: boolean;
+  /** The event as LINE sent it. */
+  raw: LineLifecycleRawEvent;
+}
+
+/** Receives every lifecycle event the adapter accepts. */
+export type LineLifecycleHandler = (
+  event: LineLifecycleEvent
+) => void | Promise<void>;
 
 /** Raw LINE webhook payload (top-level) */
 export interface LineWebhookPayload {

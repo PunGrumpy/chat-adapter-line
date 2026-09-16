@@ -115,15 +115,21 @@ const readStickerId = (value: unknown, field: string): string => {
   return value;
 };
 
+/**
+ * Only the resource types LINE personalizes are refused. An unfamiliar one is
+ * let through, because the outbound sticker message never carries the
+ * resource type at all, and LINE asks integrations to tolerate types it adds
+ * later rather than fail on them.
+ */
 const validateResourceType = (value: unknown): void => {
   if (value === undefined) {
     return;
   }
 
-  if (typeof value !== "string" || !isKnownResourceType(value)) {
+  if (typeof value !== "string") {
     throw new ValidationError(
       "line",
-      `Unknown sticker resource type: ${String(value)}`
+      `sticker.resourceType must be a string, got ${String(value)}`
     );
   }
 

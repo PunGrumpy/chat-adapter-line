@@ -13,7 +13,7 @@ const textMessage = (
   overrides: Partial<LineMessageEvent["message"]> = {}
 ): LineMessageEvent["message"] => ({
   id: "msg-1",
-  text: "Good morning (love)",
+  text: "Good morning (love) and (smile)",
   type: "text",
   ...overrides,
 });
@@ -28,15 +28,27 @@ describe("parseInboundEmojis", () => {
       textMessage({
         emojis: [
           { emojiId: "001", index: 13, length: 6, productId: PRODUCT_ID },
-          { emojiId: "002", index: 20, length: 7, productId: PRODUCT_ID },
+          { emojiId: "002", index: 24, length: 7, productId: PRODUCT_ID },
         ],
       })
     );
 
     expect(emojis).toEqual([
       { emojiId: "001", index: 13, length: 6, productId: PRODUCT_ID },
-      { emojiId: "002", index: 20, length: 7, productId: PRODUCT_ID },
+      { emojiId: "002", index: 24, length: 7, productId: PRODUCT_ID },
     ]);
+  });
+
+  it("drops every emoji when the message carries no text", () => {
+    expect(
+      parseInboundEmojis({
+        emojis: [
+          { emojiId: "001", index: 0, length: 6, productId: PRODUCT_ID },
+        ],
+        id: "msg-1",
+        type: "text",
+      } as never)
+    ).toEqual([]);
   });
 
   it("returns an empty array when emojis is not an array", () => {
@@ -60,6 +72,10 @@ describe("parseInboundEmojis", () => {
       { emojiId: "001", index: 13, length: 0, productId: PRODUCT_ID },
     ],
     [
+      "a span running past the text",
+      { emojiId: "001", index: 13, length: 99, productId: PRODUCT_ID },
+    ],
+    [
       "an empty productId",
       { emojiId: "001", index: 13, length: 6, productId: "" },
     ],
@@ -70,13 +86,13 @@ describe("parseInboundEmojis", () => {
       textMessage({
         emojis: [
           bad,
-          { emojiId: "002", index: 20, length: 7, productId: PRODUCT_ID },
+          { emojiId: "002", index: 24, length: 7, productId: PRODUCT_ID },
         ] as never,
       })
     );
 
     expect(emojis).toEqual([
-      { emojiId: "002", index: 20, length: 7, productId: PRODUCT_ID },
+      { emojiId: "002", index: 24, length: 7, productId: PRODUCT_ID },
     ]);
   });
 });

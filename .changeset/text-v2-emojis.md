@@ -2,7 +2,7 @@
 "chat-adapter-line": patch
 ---
 
-Support native LINE emoji in both directions. An inbound text message now exposes `LineMessage.emojis`, each entry carrying the `index`, `length`, `productId`, and `emojiId` LINE reported. The adapter leaves `message.text` exactly as LINE sent it, emoji sequences and all, and drops a malformed entry rather than the whole message.
+Support native LINE emoji in both directions. An inbound text message now exposes `LineMessage.emojis`, each entry carrying the `index`, `length`, `productId`, and `emojiId` LINE reported. The adapter leaves `message.text` exactly as LINE sent it, emoji sequences and all, and drops an entry that is malformed or whose span runs past the text, rather than the whole message.
 
 Outbound, `text` and `raw` postables accept `emojis: [{ index, productId, emojiId }]`. Each `index` must line up with a `$` in the text, which the adapter replaces with an `{emojiN}` placeholder on a LINE text message v2, the same shape it already uses for mentions. One message can therefore carry both, and the adapter rejects a mention and an emoji that cover the same characters, an index that does not land on a `$`, an empty `productId` or `emojiId`, and more than the 100 substitutions LINE accepts. Emoji are rejected on Markdown, AST, card, Flex, audio, location, and sticker postables for the same reason mentions are: those have no stable character offsets.
 

@@ -19,9 +19,10 @@ const isIdentifier = (value: unknown): value is string =>
 /**
  * Reads LINE's `emojis` array off an inbound text message.
  *
- * Entries without a usable position or identifier pair are dropped, so one
- * malformed entry never costs the caller the rest of the message. The text
- * itself is left alone, native emoji sequences and all.
+ * Entries without a usable identifier pair are dropped, as are those whose
+ * span runs past the text, so one malformed entry never costs the caller the
+ * rest of the message and no entry points at characters that are not there.
+ * The text itself is left alone, native emoji sequences and all.
  */
 export const parseInboundEmojis = (
   message: LineMessageEvent["message"]
@@ -31,6 +32,7 @@ export const parseInboundEmojis = (
     return [];
   }
 
+  const text = message.text ?? "";
   const emojis: LineEmoji[] = [];
 
   for (const entry of entries) {
@@ -39,6 +41,7 @@ export const parseInboundEmojis = (
       !isPosition(entry.index) ||
       !isPosition(entry.length) ||
       entry.length === 0 ||
+      entry.index + entry.length > text.length ||
       !isIdentifier(entry.productId) ||
       !isIdentifier(entry.emojiId)
     ) {

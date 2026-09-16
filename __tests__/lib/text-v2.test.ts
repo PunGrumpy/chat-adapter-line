@@ -279,4 +279,25 @@ describe("buildTextMessage", () => {
       })
     ).toThrow(ValidationError);
   });
+
+  it("counts mentions and emoji against one substitution budget", () => {
+    const mentionCount = MAX_MENTIONS_PER_MESSAGE;
+    const emojiCount = MAX_SUBSTITUTIONS_PER_MESSAGE - mentionCount + 1;
+    const text = "@".repeat(mentionCount) + "$".repeat(emojiCount);
+
+    expect(() =>
+      buildTextMessage(text, {
+        emojis: Array.from({ length: emojiCount }, (_, offset) => ({
+          emojiId: "001",
+          index: mentionCount + offset,
+          productId: PRODUCT_ID,
+        })),
+        mentions: Array.from({ length: mentionCount }, (_, index) => ({
+          index,
+          length: 1,
+          userId: "U1",
+        })),
+      })
+    ).toThrow(/at most 100/);
+  });
 });

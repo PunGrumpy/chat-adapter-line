@@ -1,6 +1,6 @@
 # Chat SDK LINE adapter
 
-[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, native emoji, quotes, Flex Messages, stickers, audio, locations, and batch messages back.
+[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, native emoji, quotes, Flex Messages, stickers, audio, locations, and batch messages back. It also reports LINE's lifecycle events, from a new follower to a member leaving a group.
 
 ## Install the package
 
@@ -285,6 +285,35 @@ bot.onSubscribedMessage(async (thread, message) => {
 LINE always sends the coordinates on an inbound location, and leaves `title` and `address` optional, because a sender can drop a pin without naming it. Coordinates outside the geographic ranges leave `message.location` unset rather than arriving as a place that looks valid. Webhook parsing makes no geocoding, map, or tile request.
 
 Sending needs all four fields: `title` and `address` must be non-blank and at most 100 characters, `latitude` must fall between -90 and 90, and `longitude` between -180 and 180. Anything else throws a `ValidationError` before the adapter calls LINE. Locations use the same reply-first, push-fallback delivery as text, and `broadcastMessages()` and `multicastMessages()` accept them too. A LINE location message has no room for a quote, so a `quoteToken` or `mentions` on a `location` postable throws, as it does on a card.
+
+### Lifecycle events
+
+LINE reports who the bot can reach through `follow`, `unfollow`, `join`, `leave`, `memberJoined`, and `memberLeft` events. These are not messages, so they never reach `onMessage()` and are never turned into synthetic text. Subscribe to them on the adapter:
+
+```typescript
+const adapter = createLineAdapter();
+
+const stop = adapter.onLifecycleEvent(async (event) => {
+  switch (event.type) {
+    case "follow":
+      await adapter.postMessage(event.threadId, "Thanks for adding me");
+      break;
+    case "memberJoined":
+      console.log("joined", event.members, "in", event.threadId);
+      break;
+    default:
+      console.log(event.type, event.sourceType, event.sourceId);
+  }
+});
+```
+
+Every event carries `type`, `threadId`, `sourceType`, `sourceId`, `timestamp`, `webhookEventId`, `mode`, `isRedelivery`, and the untouched `raw` event. `userId` is set when LINE identifies the acting user, `members` lists who joined or left, `isUnblocked` says whether a `follow` came from an unblock, and `replyToken` is present only on `follow`, `join`, and `memberJoined`, the three events LINE issues one for.
+
+`onLifecycleEvent()` returns a function that unsubscribes that handler. Every registered handler sees every event. A handler that throws or rejects is logged and does not stop the others or change the webhook response, which stays `200`.
+
+LINE issues a reply token with `follow`, `join`, and `memberJoined`, and the adapter stores it, so a welcome message sent from the handler goes out over the free Reply API instead of the quota-metered Push API.
+
+Two behaviors differ from message delivery on purpose. A redelivered lifecycle event is still delivered, with `isRedelivery` set, because a missed `unfollow` cannot be recovered the way a missed message can be resent. A standby-mode event is delivered too, with `mode` set to `standby`. Filter on those fields, and deduplicate on `webhookEventId`, which LINE guarantees is unique per delivery.
 
 ### Broadcast and multicast
 

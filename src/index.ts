@@ -66,6 +66,11 @@ export type {
   LineEmoji,
   LineEmojiSegment,
   LineEvent,
+  LineEventSource,
+  LineLifecycleEvent,
+  LineLifecycleEventType,
+  LineLifecycleHandler,
+  LineLifecycleRawEvent,
   LineLocation,
   LineMention,
   LineMentionSegment,
@@ -85,7 +90,12 @@ export type {
   LineThreadId,
   LineWebhookPayload,
 } from "./types.js";
-export { decodeThreadId, encodeThreadId, isDM } from "./lib/thread-id.js";
+export {
+  decodeThreadId,
+  encodeThreadId,
+  isDM,
+  sourceIdFrom,
+} from "./lib/thread-id.js";
 export { toPlainText } from "./lib/to-plain-text.js";
 export {
   buildFlexMessage,
@@ -95,6 +105,7 @@ export {
 } from "./lib/flex-messages.js";
 export { buildLocationMessage, parseInboundLocation } from "./lib/locations.js";
 export { parseInboundEmojis } from "./lib/emojis.js";
+export { isLifecycleEvent, toLifecycleEvent } from "./lib/lifecycle-events.js";
 export { buildTextMessage } from "./lib/text-v2.js";
 export { buildStickerMessage, parseInboundSticker } from "./lib/stickers.js";
 export { linePostable, toLineMessages } from "./lib/outbound.js";

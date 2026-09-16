@@ -1,6 +1,20 @@
-import type { LineThreadId } from "../types.js";
+import type { LineEventSource, LineThreadId } from "../types.js";
 
 const LINE_THREAD_ID_PREFIX = "line:" as const;
+
+/**
+ * Read the ID that identifies a webhook event's source, whichever kind it
+ * is. LINE omits it when the user has not shared their profile.
+ */
+export const sourceIdFrom = (source: LineEventSource): string | undefined => {
+  if (source.type === "user") {
+    return source.userId;
+  }
+  if (source.type === "group") {
+    return source.groupId;
+  }
+  return source.roomId;
+};
 
 /**
  * Encode a LINE thread ID from its components.

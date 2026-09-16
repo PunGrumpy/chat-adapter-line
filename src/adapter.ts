@@ -31,6 +31,7 @@ import { ConsoleLogger } from "chat";
 
 import { deserializePostbackData } from "./lib/flex-messages.js";
 import { LineFormatConverter } from "./lib/format-converter.js";
+import { parseInboundLocation } from "./lib/locations.js";
 import { parseInboundMentions } from "./lib/mentions.js";
 import {
   toBatchLineMessages,
@@ -414,6 +415,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         ? raw.message.quoteToken
         : undefined;
     const sticker = parseInboundSticker(raw.message);
+    const location = parseInboundLocation(raw.message);
 
     const attachments: Attachment[] = [];
     if (!isText && VALID_ATTACHMENT_TYPES.has(raw.message.type)) {
@@ -437,6 +439,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       formatted: this.converter.toAst(text),
       id: raw.webhookEventId,
       isMention: mentionsBot,
+      location,
       mentions,
       metadata: {
         dateSent: new Date(raw.timestamp),

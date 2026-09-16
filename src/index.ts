@@ -64,12 +64,14 @@ export type {
   LineBatchSendResult,
   LineBroadcastOptions,
   LineEvent,
+  LineLocation,
   LineMention,
   LineMentionSegment,
   LineMessageEvent,
   LineMulticastOptions,
   LinePostableAudio,
   LinePostableFlex,
+  LinePostableLocation,
   LinePostableMessage,
   LinePostableSticker,
   LinePostableText,
@@ -89,6 +91,7 @@ export {
   deserializePostbackData,
   serializePostbackData,
 } from "./lib/flex-messages.js";
+export { buildLocationMessage, parseInboundLocation } from "./lib/locations.js";
 export { buildTextMessage } from "./lib/mentions.js";
 export { buildStickerMessage, parseInboundSticker } from "./lib/stickers.js";
 export { linePostable, toLineMessages } from "./lib/outbound.js";

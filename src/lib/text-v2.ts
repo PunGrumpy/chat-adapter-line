@@ -8,6 +8,21 @@ import { normalizeMentionSegments, toMentionee } from "./mentions.js";
 /** LINE accepts at most 100 substitution objects in one text message v2. */
 export const MAX_SUBSTITUTIONS_PER_MESSAGE = 100;
 
+/**
+ * LINE caps the text of a text message at 5000 characters, counted in UTF-16
+ * code units, which is what `String.prototype.length` counts.
+ */
+export const MAX_TEXT_LENGTH = 5000;
+
+const checkTextLength = (text: string): void => {
+  if (text.length > MAX_TEXT_LENGTH) {
+    throw new ValidationError(
+      "line",
+      `LINE accepts at most ${MAX_TEXT_LENGTH} characters in a text message, got ${text.length}`
+    );
+  }
+};
+
 /** Text message v2 reads `{` and `}` as placeholder delimiters, escaped by doubling. */
 const escapePlaceholders = (text: string): string =>
   text.replaceAll("{", "{{").replaceAll("}", "}}");
@@ -59,7 +74,8 @@ const toPlaceholders = (
  * `{mentionN}` or `{emojiN}` placeholder on a `textV2` message, and LINE
  * renders the substitution in place. Mentions and emoji share one text, so
  * two of them covering the same characters are rejected whichever kind they
- * are.
+ * are. Either shape is rejected once the text LINE would receive passes
+ * 5000 characters.
  */
 export const buildTextMessage = (
   text: string,
@@ -71,6 +87,7 @@ export const buildTextMessage = (
   const placeholders = toPlaceholders(text, options);
 
   if (placeholders.length === 0) {
+    checkTextLength(text);
     return { text, type: "text", ...quote };
   }
 
@@ -102,6 +119,10 @@ export const buildTextMessage = (
   }
 
   encoded += escapePlaceholders(text.slice(cursor));
+
+  // The limit applies to what is sent, and placeholders and escaped braces
+  // change the length, so the encoded text is what gets measured.
+  checkTextLength(encoded);
 
   return { substitution, text: encoded, type: "textV2", ...quote };
 };

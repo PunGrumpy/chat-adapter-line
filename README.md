@@ -1,6 +1,6 @@
 # Chat SDK LINE adapter
 
-[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, quotes, Flex Messages, stickers, audio, and batch messages back.
+[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, quotes, Flex Messages, stickers, audio, locations, and batch messages back.
 
 ## Install the package
 
@@ -210,6 +210,34 @@ bot.onSubscribedMessage(async (thread, message) => {
 Alongside `packageId` and `stickerId`, an inbound sticker carries `resourceType`, up to 15 `keywords` describing the sticker, and the `text` the sender typed on a personalized sticker. Classify a sticker from those fields instead of reading the raw webhook payload. Webhook parsing never downloads or transforms the sticker image.
 
 A bot can only send the stickers in [LINE's sticker definitions](https://developers.line.biz/en/docs/messaging-api/sticker-list/), so both IDs must be decimal strings and the adapter rejects anything else before calling LINE. It also rejects the four resource types LINE renders from text the sender typed, `CUSTOM`, `MESSAGE`, `NAME_TEXT`, and `PER_STICKER_TEXT`, rather than sending a different sticker under the same IDs. Stickers use the same reply-first, push-fallback delivery as text, and `broadcastMessages()` and `multicastMessages()` accept them too. Unlike a card or audio message, a sticker can carry a `quoteToken`; `mentions` throws a `ValidationError`.
+
+### Location messages
+
+A location message arrives with `message.location`, and a `location` postable sends a pin back:
+
+```typescript
+import { LineMessage, linePostable } from "chat-adapter-line";
+
+bot.onSubscribedMessage(async (thread, message) => {
+  if (message instanceof LineMessage && message.location) {
+    const { latitude, longitude } = message.location;
+    await thread.post(
+      linePostable({
+        location: {
+          title: "Our office",
+          address: "1-3 Kioicho, Chiyoda-ku, Tokyo, 102-8282, Japan",
+          latitude,
+          longitude,
+        },
+      })
+    );
+  }
+});
+```
+
+LINE always sends the coordinates on an inbound location, and leaves `title` and `address` optional, because a sender can drop a pin without naming it. Coordinates outside the geographic ranges leave `message.location` unset rather than arriving as a place that looks valid. Webhook parsing makes no geocoding, map, or tile request.
+
+Sending needs all four fields: `title` and `address` must be non-blank and at most 100 characters, `latitude` must fall between -90 and 90, and `longitude` between -180 and 180. Anything else throws a `ValidationError` before the adapter calls LINE. Locations use the same reply-first, push-fallback delivery as text, and `broadcastMessages()` and `multicastMessages()` accept them too. A LINE location message has no room for a quote, so a `quoteToken` or `mentions` on a `location` postable throws, as it does on a card.
 
 ### Broadcast and multicast
 

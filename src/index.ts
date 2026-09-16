@@ -72,16 +72,19 @@ export type {
   LineLifecycleHandler,
   LineLifecycleRawEvent,
   LineLocation,
+  LineMediaUrls,
   LineMention,
   LineMentionSegment,
   LineMessageEvent,
   LineMulticastOptions,
   LinePostableAudio,
   LinePostableFlex,
+  LinePostableImage,
   LinePostableLocation,
   LinePostableMessage,
   LinePostableSticker,
   LinePostableText,
+  LinePostableVideo,
   LinePostbackEvent,
   LineRawMessage,
   LineSticker,
@@ -106,6 +109,7 @@ export {
 export { buildLocationMessage, parseInboundLocation } from "./lib/locations.js";
 export { parseInboundEmojis } from "./lib/emojis.js";
 export { isLifecycleEvent, toLifecycleEvent } from "./lib/lifecycle-events.js";
+export { buildAudioMessage, buildMediaMessage } from "./lib/media.js";
 export { buildTextMessage } from "./lib/text-v2.js";
 export { buildStickerMessage, parseInboundSticker } from "./lib/stickers.js";
 export { linePostable, toLineMessages } from "./lib/outbound.js";

@@ -7,6 +7,7 @@ import { buildFlexMessage, buildNativeFlexMessage } from "./flex-messages.js";
 import type { LineFormatConverter } from "./format-converter.js";
 import { isRecord } from "./is-record.js";
 import { buildLocationMessage } from "./locations.js";
+import { buildAudioMessage, buildMediaMessage } from "./media.js";
 import { buildStickerMessage } from "./stickers.js";
 import { buildTextMessage } from "./text-v2.js";
 import { toPlainText } from "./to-plain-text.js";
@@ -16,9 +17,6 @@ export const MAX_MESSAGES_PER_REQUEST = 5;
 
 /** LINE multicast accepts at most 500 user IDs per request. */
 export const MAX_MULTICAST_RECIPIENTS = 500;
-
-/** LINE caps media URLs at 2000 characters. */
-const MAX_CONTENT_URL_LENGTH = 2000;
 
 /** LINE multicast accepts one aggregation unit: up to 30 alphanumerics or underscores. */
 const MAX_AGGREGATION_UNITS = 1;
@@ -91,48 +89,6 @@ const rejectSubstitutions = (options: LineTextOptions, kind: string): void => {
   }
 };
 
-const isHttpsUrl = (value: string): boolean => {
-  try {
-    return new URL(value).protocol === "https:";
-  } catch {
-    return false;
-  }
-};
-
-const buildAudioMessage = (audio: unknown): messagingApi.AudioMessage => {
-  if (!isRecord(audio)) {
-    throw new ValidationError("line", "audio must be an object");
-  }
-
-  const { originalContentUrl, duration } = audio;
-
-  if (
-    typeof originalContentUrl !== "string" ||
-    !isHttpsUrl(originalContentUrl)
-  ) {
-    throw new ValidationError(
-      "line",
-      "audio.originalContentUrl must be an HTTPS URL"
-    );
-  }
-
-  if (originalContentUrl.length > MAX_CONTENT_URL_LENGTH) {
-    throw new ValidationError(
-      "line",
-      `audio.originalContentUrl must be at most ${MAX_CONTENT_URL_LENGTH} characters`
-    );
-  }
-
-  if (!Number.isInteger(duration) || (duration as number) <= 0) {
-    throw new ValidationError(
-      "line",
-      "audio.duration must be a positive integer number of milliseconds"
-    );
-  }
-
-  return { duration: duration as number, originalContentUrl, type: "audio" };
-};
-
 /**
  * Converts one postable into LINE Messaging API message objects.
  *
@@ -173,6 +129,18 @@ export const toLineMessages = (
     rejectQuote(options, "audio");
     rejectSubstitutions(options, "audio");
     return [buildAudioMessage(message.audio)];
+  }
+
+  if ("image" in message) {
+    rejectQuote(options, "image");
+    rejectSubstitutions(options, "image");
+    return [buildMediaMessage(message.image, "image")];
+  }
+
+  if ("video" in message) {
+    rejectQuote(options, "video");
+    rejectSubstitutions(options, "video");
+    return [buildMediaMessage(message.video, "video")];
   }
 
   if ("location" in message) {

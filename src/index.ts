@@ -63,6 +63,8 @@ export type {
   LineAdapterConfig,
   LineBatchSendResult,
   LineBroadcastOptions,
+  LineEmoji,
+  LineEmojiSegment,
   LineEvent,
   LineLocation,
   LineMention,
@@ -92,6 +94,7 @@ export {
   serializePostbackData,
 } from "./lib/flex-messages.js";
 export { buildLocationMessage, parseInboundLocation } from "./lib/locations.js";
+export { parseInboundEmojis } from "./lib/emojis.js";
 export { buildTextMessage } from "./lib/text-v2.js";
 export { buildStickerMessage, parseInboundSticker } from "./lib/stickers.js";
 export { linePostable, toLineMessages } from "./lib/outbound.js";

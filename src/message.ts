@@ -2,6 +2,7 @@ import { Message } from "chat";
 import type { MessageData } from "chat";
 
 import type {
+  LineEmoji,
   LineEvent,
   LineLocation,
   LineMention,
@@ -9,6 +10,7 @@ import type {
 } from "./types.js";
 
 export interface LineMessageData extends MessageData<LineEvent> {
+  emojis: LineEmoji[];
   location?: LineLocation;
   mentions: LineMention[];
   quoteToken?: string;
@@ -20,6 +22,12 @@ export interface LineMessageData extends MessageData<LineEvent> {
  * `Message` has no slot for.
  */
 export class LineMessage extends Message<LineEvent> {
+  /**
+   * Native LINE emoji on this message, in the order LINE reported them. The
+   * text keeps the emoji sequences these entries point at.
+   */
+  readonly emojis: LineEmoji[];
+
   /**
    * The place this message points at, on a location message. Fill in a title
    * and address to send it back on a `location` postable.
@@ -44,6 +52,7 @@ export class LineMessage extends Message<LineEvent> {
 
   constructor(data: LineMessageData) {
     super(data);
+    this.emojis = data.emojis;
     this.location = data.location;
     this.mentions = data.mentions;
     this.quoteToken = data.quoteToken;

@@ -201,6 +201,18 @@ const makePostbackEvent = (
   ...overrides,
 });
 
+const makeLifecycleEvent = (
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> => ({
+  deliveryContext: { isRedelivery: false },
+  mode: "active",
+  source: { type: "user", userId: "u-123" },
+  timestamp: 1_700_000_000_000,
+  type: "follow",
+  webhookEventId: "evt-lc-1",
+  ...overrides,
+});
+
 const makeRequest = (body: string, signature?: string | null): Request =>
   new Request("https://example.com/webhook", {
     body,
@@ -712,6 +724,278 @@ describe("LineAdapter", () => {
         string,
       ];
       expect(threadId).toContain("ch-dest");
+    });
+  });
+
+  describe("onLifecycleEvent", () => {
+    let mockChat: {
+      processMessage: Mock;
+      processAction: Mock;
+      getLogger: Mock;
+    };
+
+    const deliver = async (
+      ...events: Record<string, unknown>[]
+    ): Promise<Response> => {
+      const body = JSON.stringify({ destination: "ch-123", events });
+      const sig = generateSignature(body, validConfig.channelSecret);
+      return await adapter.handleWebhook(makeRequest(body, sig));
+    };
+
+    beforeEach(async () => {
+      mockChat = {
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+        processAction: vi.fn(),
+        processMessage: vi.fn(),
+      };
+
+      await adapter.initialize(mockChat as never);
+    });
+
+    it.each([
+      ["follow", { replyToken: "rt-1", type: "follow" }],
+      ["unfollow", { type: "unfollow" }],
+      ["join", { replyToken: "rt-1", type: "join" }],
+      ["leave", { type: "leave" }],
+      [
+        "memberJoined",
+        {
+          joined: { members: [{ type: "user", userId: "u-9" }] },
+          replyToken: "rt-1",
+          type: "memberJoined",
+        },
+      ],
+      [
+        "memberLeft",
+        {
+          left: { members: [{ type: "user", userId: "u-9" }] },
+          type: "memberLeft",
+        },
+      ],
+    ])("delivers a %s event", async (type, overrides) => {
+      const handler = vi.fn();
+      adapter.onLifecycleEvent(handler);
+
+      const response = await deliver(makeLifecycleEvent(overrides));
+
+      expect(response.status).toBe(200);
+      expect(handler).toHaveBeenCalledOnce();
+      expect(handler.mock.calls[0][0]).toMatchObject({
+        sourceId: "u-123",
+        threadId: "line:bot-123:user:u-123",
+        type,
+        webhookEventId: "evt-lc-1",
+      });
+    });
+
+    it.each([
+      ["user", { type: "user", userId: "u-123" }, "line:bot-123:user:u-123"],
+      ["group", { groupId: "g-1", type: "group" }, "line:bot-123:group:g-1"],
+      ["room", { roomId: "r-1", type: "room" }, "line:bot-123:room:r-1"],
+    ])("resolves a %s source to its thread", async (_l, source, threadId) => {
+      const handler = vi.fn();
+      adapter.onLifecycleEvent(handler);
+
+      await deliver(makeLifecycleEvent({ source }));
+
+      expect(handler.mock.calls[0][0]).toMatchObject({ threadId });
+    });
+
+    it("delivers an event that carries no reply token", async () => {
+      const handler = vi.fn();
+      adapter.onLifecycleEvent(handler);
+
+      await deliver(makeLifecycleEvent({ type: "unfollow" }));
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(handler.mock.calls[0][0].replyToken).toBeUndefined();
+    });
+
+    it("delivers a redelivered event with the flag set", async () => {
+      const handler = vi.fn();
+      adapter.onLifecycleEvent(handler);
+
+      await deliver(
+        makeLifecycleEvent({ deliveryContext: { isRedelivery: true } })
+      );
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(handler.mock.calls[0][0].isRedelivery).toBe(true);
+    });
+
+    it("delivers a standby-mode event with the mode set", async () => {
+      const handler = vi.fn();
+      adapter.onLifecycleEvent(handler);
+
+      await deliver(makeLifecycleEvent({ mode: "standby" }));
+
+      expect(handler.mock.calls[0][0].mode).toBe("standby");
+    });
+
+    it("never routes a lifecycle event to the message handlers", async () => {
+      adapter.onLifecycleEvent(vi.fn());
+
+      await deliver(makeLifecycleEvent({ type: "unfollow" }));
+
+      expect(mockChat.processMessage).not.toHaveBeenCalled();
+      expect(mockChat.processAction).not.toHaveBeenCalled();
+    });
+
+    it("delivers lifecycle and message events from one payload", async () => {
+      const handler = vi.fn();
+      adapter.onLifecycleEvent(handler);
+
+      const response = await deliver(
+        makeLifecycleEvent({ type: "follow" }),
+        makeEvent() as never
+      );
+
+      expect(response.status).toBe(200);
+      expect(handler).toHaveBeenCalledOnce();
+      expect(mockChat.processMessage).toHaveBeenCalledOnce();
+    });
+
+    it("gives the follow reply token to the reply-first path", async () => {
+      adapter.onLifecycleEvent(vi.fn());
+      mocks.replyMessage.mockResolvedValue({
+        sentMessages: [{ id: "replied-1" }],
+      });
+
+      await deliver(makeLifecycleEvent({ replyToken: "follow-token" }));
+      await adapter.postMessage("line:bot-123:user:u-123", "Welcome");
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Welcome", type: "text" }],
+        replyToken: "follow-token",
+      });
+    });
+
+    it("keeps the follow reply token even with nothing listening", async () => {
+      mocks.replyMessage.mockResolvedValue({
+        sentMessages: [{ id: "replied-1" }],
+      });
+
+      await deliver(makeLifecycleEvent({ replyToken: "follow-token" }));
+      await adapter.postMessage("line:bot-123:user:u-123", "Welcome");
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Welcome", type: "text" }],
+        replyToken: "follow-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("ignores a dummy reply token from the LINE console verifier", async () => {
+      mocks.pushMessage.mockResolvedValue({
+        sentMessages: [{ id: "pushed-1" }],
+      });
+
+      await deliver(
+        makeLifecycleEvent({ replyToken: "00000000000000000000000000000000" })
+      );
+      await adapter.postMessage("line:bot-123:user:u-123", "Welcome");
+
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+      expect(mocks.pushMessage).toHaveBeenCalledOnce();
+    });
+
+    it("reaches every registered handler", async () => {
+      const first = vi.fn();
+      const second = vi.fn();
+      adapter.onLifecycleEvent(first);
+      adapter.onLifecycleEvent(second);
+
+      await deliver(makeLifecycleEvent());
+
+      expect(first).toHaveBeenCalledOnce();
+      expect(second).toHaveBeenCalledOnce();
+    });
+
+    it("stops delivering once a handler unsubscribes", async () => {
+      const handler = vi.fn();
+      const stop = adapter.onLifecycleEvent(handler);
+
+      await deliver(makeLifecycleEvent());
+      stop();
+      await deliver(makeLifecycleEvent());
+
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it("keeps answering 200 when a handler throws", async () => {
+      const failing = vi.fn(() => {
+        throw new Error("handler exploded");
+      });
+      const healthy = vi.fn();
+      adapter.onLifecycleEvent(failing);
+      adapter.onLifecycleEvent(healthy);
+
+      const response = await deliver(makeLifecycleEvent());
+
+      expect(response.status).toBe(200);
+      expect(healthy).toHaveBeenCalledOnce();
+    });
+
+    it("keeps answering 200 when a handler rejects", async () => {
+      adapter.onLifecycleEvent(() => Promise.reject(new Error("nope")));
+
+      const response = await deliver(makeLifecycleEvent());
+
+      expect(response.status).toBe(200);
+    });
+
+    it.each([
+      ["an unknown event type", { type: "videoPlayComplete" }],
+      ["a missing source", { source: undefined }],
+      ["a source with no ID", { source: { type: "user" } }],
+      ["a missing webhookEventId", { webhookEventId: undefined }],
+    ])("ignores a malformed event with %s", async (_label, overrides) => {
+      const handler = vi.fn();
+      adapter.onLifecycleEvent(handler);
+
+      const response = await deliver(makeLifecycleEvent(overrides));
+
+      expect(response.status).toBe(200);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("delivers to a handler on an adapter with no Chat instance", async () => {
+      const standalone = new LineAdapter(validConfig);
+      const handler = vi.fn();
+      standalone.onLifecycleEvent(handler);
+
+      const body = JSON.stringify({
+        destination: "ch-dest",
+        events: [makeLifecycleEvent({ type: "unfollow" })],
+      });
+      const response = await standalone.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret))
+      );
+
+      expect(response.status).toBe(200);
+      expect(handler).toHaveBeenCalledOnce();
+      expect(handler.mock.calls[0][0].threadId).toBe("line:ch-dest:user:u-123");
+    });
+
+    it("still verifies the signature", async () => {
+      const handler = vi.fn();
+      adapter.onLifecycleEvent(handler);
+
+      const body = JSON.stringify({
+        destination: "ch-123",
+        events: [makeLifecycleEvent()],
+      });
+      const response = await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, "wrong-secret"))
+      );
+
+      expect(response.status).toBe(401);
+      expect(handler).not.toHaveBeenCalled();
     });
   });
 

@@ -4,6 +4,7 @@ import {
   decodeThreadId,
   encodeThreadId,
   isDM,
+  sourceIdFrom,
 } from "../../src/lib/thread-id.js";
 
 describe("encodeThreadId", () => {
@@ -119,5 +120,23 @@ describe("isDM", () => {
 
   it("returns false for empty string", () => {
     expect(isDM("")).toBe(false);
+  });
+});
+
+describe("sourceIdFrom", () => {
+  it.each([
+    ["a user", { type: "user" as const, userId: "u-1" }, "u-1"],
+    ["a group", { groupId: "g-1", type: "group" as const }, "g-1"],
+    ["a room", { roomId: "r-1", type: "room" as const }, "r-1"],
+  ])("reads the ID of %s source", (_label, source, expected) => {
+    expect(sourceIdFrom(source)).toBe(expected);
+  });
+
+  it.each([
+    ["a user who has not shared their profile", { type: "user" as const }],
+    ["a group with no ID", { type: "group" as const }],
+    ["a room with no ID", { type: "room" as const }],
+  ])("returns undefined for %s", (_label, source) => {
+    expect(sourceIdFrom(source)).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 # Chat SDK LINE adapter
 
-[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, quotes, Flex Messages, audio, and batch messages back.
+[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, quotes, Flex Messages, stickers, audio, and batch messages back.
 
 ## Install the package
 
@@ -187,6 +187,29 @@ await thread.post(
 ```
 
 The URL must be HTTPS and at most 2000 characters, and the duration a positive integer. Audio uses the same reply-first, push-fallback delivery as text.
+
+### Stickers
+
+A sticker message arrives with `message.sticker`, and a `sticker` postable sends one back. Passing the inbound sticker straight through echoes it:
+
+```typescript
+import { LineMessage, linePostable } from "chat-adapter-line";
+
+bot.onSubscribedMessage(async (thread, message) => {
+  if (message instanceof LineMessage && message.sticker) {
+    await thread.post(
+      linePostable({
+        sticker: message.sticker,
+        quoteToken: message.quoteToken,
+      })
+    );
+  }
+});
+```
+
+Alongside `packageId` and `stickerId`, an inbound sticker carries `resourceType`, up to 15 `keywords` describing the sticker, and the `text` the sender typed on a personalized sticker. Classify a sticker from those fields instead of reading the raw webhook payload. Webhook parsing never downloads or transforms the sticker image.
+
+A bot can only send the stickers in [LINE's sticker definitions](https://developers.line.biz/en/docs/messaging-api/sticker-list/), so both IDs must be decimal strings and the adapter rejects anything else before calling LINE. It also rejects the four resource types LINE renders from text the sender typed, `CUSTOM`, `MESSAGE`, `NAME_TEXT`, and `PER_STICKER_TEXT`, rather than sending a different sticker under the same IDs. Stickers use the same reply-first, push-fallback delivery as text, and `broadcastMessages()` and `multicastMessages()` accept them too. Unlike a card or audio message, a sticker can carry a `quoteToken`; `mentions` throws a `ValidationError`.
 
 ### Broadcast and multicast
 

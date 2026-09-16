@@ -23,6 +23,8 @@ jobs:
             command: bun run format
           - name: Typecheck
             command: bun run typecheck
+          - name: Test
+            command: bun run test
     steps:
       - name: Checkout
         uses: actions/checkout@v6

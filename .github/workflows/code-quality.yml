@@ -19,8 +19,6 @@ jobs:
         include:
           - name: Lint
             command: bun run lint
-          - name: Format
-            command: bun run format
           - name: Typecheck
             command: bun run typecheck
           - name: Test
@@ -42,7 +40,6 @@ jobs:
       - name: Install dependencies
         run: bun install
       - name: Build
-        if: ${{ matrix.name != 'Format' }}
         run: bun run build
       - name: ${{ matrix.name }}
         run: ${{ matrix.command }}

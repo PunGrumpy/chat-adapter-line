@@ -104,6 +104,46 @@ describe("toLineMessages", () => {
     ]);
   });
 
+  it("converts a sticker to a native sticker message", () => {
+    expect(
+      toLineMessages(
+        { sticker: { packageId: "446", stickerId: "1988" } },
+        converter
+      )
+    ).toEqual([{ packageId: "446", stickerId: "1988", type: "sticker" }]);
+  });
+
+  it("carries a quote token on a sticker postable", () => {
+    expect(
+      toLineMessages(
+        {
+          quoteToken: "qt-1",
+          sticker: { packageId: "446", stickerId: "1988" },
+        },
+        converter
+      )
+    ).toEqual([
+      {
+        packageId: "446",
+        quoteToken: "qt-1",
+        stickerId: "1988",
+        type: "sticker",
+      },
+    ]);
+  });
+
+  it("rejects mentions on a sticker postable", () => {
+    expect(() =>
+      toLineMessages(
+        {
+          mentions: [{ index: 0, length: 1, userId: "u" }],
+          sticker: { packageId: "446", stickerId: "1988" },
+        } as never,
+        converter
+      )
+    ).toThrow(ValidationError);
+  });
+
   it("rejects an audio URL longer than 2000 characters", () => {
     const originalContentUrl = `https://example.com/${"a".repeat(2000)}`;
 

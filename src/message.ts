@@ -1,11 +1,12 @@
 import { Message } from "chat";
 import type { MessageData } from "chat";
 
-import type { LineEvent, LineMention } from "./types.js";
+import type { LineEvent, LineMention, LineSticker } from "./types.js";
 
 export interface LineMessageData extends MessageData<LineEvent> {
   mentions: LineMention[];
   quoteToken?: string;
+  sticker?: LineSticker;
 }
 
 /**
@@ -23,9 +24,16 @@ export class LineMessage extends Message<LineEvent> {
    */
   readonly quoteToken?: string;
 
+  /**
+   * The sticker this message carries, on a sticker message. Pass it back on
+   * a `sticker` postable to send the same sticker.
+   */
+  readonly sticker?: LineSticker;
+
   constructor(data: LineMessageData) {
     super(data);
     this.mentions = data.mentions;
     this.quoteToken = data.quoteToken;
+    this.sticker = data.sticker;
   }
 }

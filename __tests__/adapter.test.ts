@@ -790,6 +790,64 @@ describe("LineAdapter", () => {
       });
     });
 
+    it("exposes the sticker on a sticker message", () => {
+      const event = makeEvent({
+        message: {
+          id: "stk-1",
+          keywords: ["thanks"],
+          packageId: "446",
+          quoteToken: "qt-stk",
+          stickerId: "1988",
+          stickerResourceType: "STATIC",
+          type: "sticker",
+        },
+      } as never);
+      const message = adapter.parseMessage(event);
+
+      expect(message.sticker).toEqual({
+        keywords: ["thanks"],
+        packageId: "446",
+        resourceType: "STATIC",
+        stickerId: "1988",
+      });
+      expect(message.quoteToken).toBe("qt-stk");
+      expect(message.id).toBe("evt-1");
+      expect(message.text).toBe("");
+      expect(message.attachments).toHaveLength(0);
+    });
+
+    it("leaves the sticker unset on a malformed sticker event", () => {
+      const event = makeEvent({
+        message: { id: "stk-1", packageId: "446", type: "sticker" },
+      } as never);
+
+      expect(adapter.parseMessage(event).sticker).toBeUndefined();
+    });
+
+    it("leaves the sticker unset on a text message", () => {
+      expect(adapter.parseMessage(makeEvent()).sticker).toBeUndefined();
+    });
+
+    it.each([
+      ["group", { source: { groupId: "g-123", type: "group" as const } }],
+      ["room", { source: { roomId: "r-123", type: "room" as const } }],
+    ])("reads a sticker from a %s source", (_label, overrides) => {
+      const event = makeEvent({
+        message: {
+          id: "stk-1",
+          packageId: "446",
+          stickerId: "1988",
+          type: "sticker",
+        },
+        ...overrides,
+      } as never);
+
+      expect(adapter.parseMessage(event).sticker).toMatchObject({
+        packageId: "446",
+        stickerId: "1988",
+      });
+    });
+
     it("handles group source type", () => {
       const event = makeEvent({
         source: { groupId: "g-123", type: "group" },
@@ -1773,6 +1831,84 @@ describe("LineAdapter", () => {
 
       expect(mocks.pushMessage).not.toHaveBeenCalled();
       expect(mocks.replyMessage).not.toHaveBeenCalled();
+    });
+
+    const sticker = { packageId: "446", stickerId: "1988" };
+
+    it("sends a native sticker message via push", async () => {
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        sticker,
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ packageId: "446", stickerId: "1988", type: "sticker" }],
+        to: "u-123",
+      });
+      expect(result.id).toBe("pushed-1");
+    });
+
+    it("sends a native sticker message via reply when a token is available", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        sticker,
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ ...sticker, type: "sticker" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(result.id).toBe("replied-1");
+    });
+
+    it("falls back to push for a sticker when the reply token is rejected", async () => {
+      await seedReplyToken(adapter, { replyToken: "stale-reply-token" });
+      mocks.replyMessage.mockRejectedValueOnce(makeReplyTokenError());
+
+      await adapter.postMessage("line:bot-123:user:u-123", { sticker });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ ...sticker, type: "sticker" }],
+        to: "u-123",
+      });
+    });
+
+    it("quotes an inbound sticker with a sticker", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        quoteToken: "qt-stk",
+        sticker,
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ ...sticker, quoteToken: "qt-stk", type: "sticker" }],
+        to: "u-123",
+      });
+    });
+
+    it.each([
+      ["a missing packageId", { stickerId: "1988" }],
+      ["a missing stickerId", { packageId: "446" }],
+      ["a non-decimal ID", { packageId: "446", stickerId: "cat" }],
+      ["a sender-text resource type", { ...sticker, resourceType: "MESSAGE" }],
+      ["an unknown resource type", { ...sticker, resourceType: "HOLOGRAM" }],
+    ])("rejects a sticker with %s before calling LINE", async (_label, bad) => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          sticker: bad,
+        } as never)
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+    });
+
+    it("propagates provider failures for sticker sends", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { sticker })
+      ).rejects.toThrow("LINE is down");
     });
 
     it("propagates provider failures for audio sends", async () => {

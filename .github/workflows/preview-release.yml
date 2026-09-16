@@ -40,7 +40,9 @@ jobs:
         run: bun run build
       - name: Publish preview to pkg.pr.new
         run: |
-          max_attempts=4
+          # pkg.pr.new answers 500s and 404s for a minute or so at a time.
+          # Back off far enough to outlast that: 10s, 20s, 40s, 80s.
+          max_attempts=5
           for attempt in $(seq 1 "$max_attempts"); do
             if bun x pkg-pr-new publish; then
               exit 0
@@ -50,7 +52,7 @@ jobs:
               exit 1
             fi
 
-            delay=$((2 ** attempt))
+            delay=$((5 * 2 ** attempt))
             echo "pkg-pr-new publish failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s..."
             sleep "$delay"
           done

@@ -193,6 +193,83 @@ describe("toLineMessages", () => {
     ).toThrow(ValidationError);
   });
 
+  it("encodes emoji on a text postable", () => {
+    expect(
+      toLineMessages(
+        {
+          emojis: [
+            { emojiId: "001", index: 6, productId: "5ac1bfd5040ab15980c9b435" },
+          ],
+          text: "Hello $",
+        },
+        converter
+      )
+    ).toEqual([
+      {
+        substitution: {
+          emoji0: {
+            emojiId: "001",
+            productId: "5ac1bfd5040ab15980c9b435",
+            type: "emoji",
+          },
+        },
+        text: "Hello {emoji0}",
+        type: "textV2",
+      },
+    ]);
+  });
+
+  it("encodes emoji on a raw postable", () => {
+    expect(
+      toLineMessages(
+        {
+          emojis: [
+            { emojiId: "001", index: 0, productId: "5ac1bfd5040ab15980c9b435" },
+          ],
+          raw: "$",
+        },
+        converter
+      )
+    ).toMatchObject([{ text: "{emoji0}", type: "textV2" }]);
+  });
+
+  it("rejects emojis that are not an array", () => {
+    expect(() =>
+      toLineMessages({ emojis: "001", text: "$" } as never, converter)
+    ).toThrow(ValidationError);
+  });
+
+  it.each(["markdown", "ast", "card", "flex", "audio", "location", "sticker"])(
+    "rejects emoji on a %s postable",
+    (kind) => {
+      const emojis = [
+        { emojiId: "001", index: 0, productId: "5ac1bfd5040ab15980c9b435" },
+      ];
+      const payloads: Record<string, Record<string, unknown>> = {
+        ast: { ast: { children: [], type: "root" } },
+        audio: {
+          audio: { duration: 1, originalContentUrl: "https://x/a.m4a" },
+        },
+        card: { card: { children: [], title: "Card", type: "card" } },
+        flex: { flex: { altText: "Bubble", contents: { type: "bubble" } } },
+        location: {
+          location: {
+            address: "Kioicho",
+            latitude: 35,
+            longitude: 139,
+            title: "Office",
+          },
+        },
+        markdown: { markdown: "**m**" },
+        sticker: { sticker: { packageId: "446", stickerId: "1988" } },
+      };
+
+      expect(() =>
+        toLineMessages({ ...payloads[kind], emojis } as never, converter)
+      ).toThrow(ValidationError);
+    }
+  );
+
   it("rejects an audio URL longer than 2000 characters", () => {
     const originalContentUrl = `https://example.com/${"a".repeat(2000)}`;
 

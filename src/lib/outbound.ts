@@ -7,8 +7,8 @@ import { buildFlexMessage, buildNativeFlexMessage } from "./flex-messages.js";
 import type { LineFormatConverter } from "./format-converter.js";
 import { isRecord } from "./is-record.js";
 import { buildLocationMessage } from "./locations.js";
-import { buildTextMessage } from "./mentions.js";
 import { buildStickerMessage } from "./stickers.js";
+import { buildTextMessage } from "./text-v2.js";
 import { toPlainText } from "./to-plain-text.js";
 
 /** LINE accepts at most five message objects per send request. */
@@ -51,6 +51,13 @@ const readTextOptions = (message: Record<string, unknown>): LineTextOptions => {
     options.mentions = message.mentions;
   }
 
+  if (message.emojis !== undefined) {
+    if (!Array.isArray(message.emojis)) {
+      throw new ValidationError("line", "emojis must be an array");
+    }
+    options.emojis = message.emojis;
+  }
+
   return options;
 };
 
@@ -63,11 +70,23 @@ const rejectQuote = (options: LineTextOptions, kind: string): void => {
   }
 };
 
-const rejectMentions = (options: LineTextOptions, kind: string): void => {
+/**
+ * Mentions and emoji are positioned by character offset, so they only ride
+ * on text the adapter sends verbatim. Anything rendered or rebuilt on the
+ * way out rejects them instead of shifting them onto the wrong characters.
+ */
+const rejectSubstitutions = (options: LineTextOptions, kind: string): void => {
   if (options.mentions !== undefined && options.mentions.length > 0) {
     throw new ValidationError(
       "line",
       `LINE cannot encode mentions into a ${kind} message. Send a \`text\` or \`raw\` message instead.`
+    );
+  }
+
+  if (options.emojis !== undefined && options.emojis.length > 0) {
+    throw new ValidationError(
+      "line",
+      `LINE cannot encode emoji into a ${kind} message. Send a \`text\` or \`raw\` message instead.`
     );
   }
 };
@@ -139,31 +158,31 @@ export const toLineMessages = (
 
   if ("flex" in message) {
     rejectQuote(options, "flex");
-    rejectMentions(options, "flex");
+    rejectSubstitutions(options, "flex");
     return [buildNativeFlexMessage(message.flex)];
   }
 
   const card = extractCard(message as AdapterPostableMessage);
   if (card) {
     rejectQuote(options, "card");
-    rejectMentions(options, "card");
+    rejectSubstitutions(options, "card");
     return [buildFlexMessage(card)];
   }
 
   if ("audio" in message) {
     rejectQuote(options, "audio");
-    rejectMentions(options, "audio");
+    rejectSubstitutions(options, "audio");
     return [buildAudioMessage(message.audio)];
   }
 
   if ("location" in message) {
     rejectQuote(options, "location");
-    rejectMentions(options, "location");
+    rejectSubstitutions(options, "location");
     return [buildLocationMessage(message.location)];
   }
 
   if ("sticker" in message) {
-    rejectMentions(options, "sticker");
+    rejectSubstitutions(options, "sticker");
     return [buildStickerMessage(message.sticker, options)];
   }
 
@@ -176,7 +195,7 @@ export const toLineMessages = (
   }
 
   if (typeof message.markdown === "string") {
-    rejectMentions(options, "markdown");
+    rejectSubstitutions(options, "markdown");
     const rendered = converter.renderPostable(
       message as AdapterPostableMessage
     );
@@ -184,7 +203,7 @@ export const toLineMessages = (
   }
 
   if (message.ast) {
-    rejectMentions(options, "ast");
+    rejectSubstitutions(options, "ast");
     const rendered = converter.fromAst(message.ast as Root);
     return [buildTextMessage(toPlainText(rendered), options)];
   }
@@ -192,7 +211,14 @@ export const toLineMessages = (
   throw new ValidationError("line", "No message content to send");
 };
 
-const hasMentionSubstitution = (message: messagingApi.Message): boolean =>
+/**
+ * True when LINE would render a native mention for this message. Emoji use
+ * the same `textV2` shape, so the message type alone does not say whether a
+ * mention is present.
+ */
+export const hasMentionSubstitution = (
+  message: messagingApi.Message
+): boolean =>
   message.type === "textV2" &&
   Object.values(message.substitution ?? {}).some(
     (entry) => entry.type === "mention"

@@ -29,11 +29,13 @@ import type {
 } from "chat";
 import { ConsoleLogger } from "chat";
 
+import { parseInboundEmojis } from "./lib/emojis.js";
 import { deserializePostbackData } from "./lib/flex-messages.js";
 import { LineFormatConverter } from "./lib/format-converter.js";
 import { parseInboundLocation } from "./lib/locations.js";
 import { parseInboundMentions } from "./lib/mentions.js";
 import {
+  hasMentionSubstitution,
   toBatchLineMessages,
   toLineMessages,
   validateAggregationUnits,
@@ -409,6 +411,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     const isText = raw.message.type === "text";
     const text = isText ? (raw.message.text ?? "") : "";
     const mentions = isText ? parseInboundMentions(raw.message) : [];
+    const emojis = isText ? parseInboundEmojis(raw.message) : [];
     const mentionsBot = mentions.some((mention) => mention.isSelf === true);
     const quoteToken =
       typeof raw.message.quoteToken === "string"
@@ -436,6 +439,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     return new LineMessage({
       attachments,
       author,
+      emojis,
       formatted: this.converter.toAst(text),
       id: raw.webhookEventId,
       isMention: mentionsBot,
@@ -468,7 +472,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     const lineMessages = toLineMessages(message, this.converter);
 
-    if (sourceType === "user" && lineMessages[0]?.type === "textV2") {
+    if (sourceType === "user" && lineMessages.some(hasMentionSubstitution)) {
       throw new ValidationError(
         "line",
         "LINE only renders mentions in group chats and multi-person chats, not 1:1 chats"

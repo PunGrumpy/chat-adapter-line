@@ -909,6 +909,54 @@ describe("LineAdapter", () => {
       });
     });
 
+    it("exposes native emoji on a text message", () => {
+      const event = makeEvent({
+        message: {
+          emojis: [
+            {
+              emojiId: "001",
+              index: 13,
+              length: 6,
+              productId: "5ac1bfd5040ab15980c9b435",
+            },
+          ],
+          id: "msg-1",
+          text: "Good morning (love)",
+          type: "text",
+        },
+      } as never);
+      const message = adapter.parseMessage(event);
+
+      expect(message.emojis).toEqual([
+        {
+          emojiId: "001",
+          index: 13,
+          length: 6,
+          productId: "5ac1bfd5040ab15980c9b435",
+        },
+      ]);
+      expect(message.text).toBe("Good morning (love)");
+    });
+
+    it("drops a malformed emoji entry without losing the message", () => {
+      const event = makeEvent({
+        message: {
+          emojis: [{ emojiId: "001", index: -1, length: 6, productId: "p" }],
+          id: "msg-1",
+          text: "Good morning (love)",
+          type: "text",
+        },
+      } as never);
+      const message = adapter.parseMessage(event);
+
+      expect(message.emojis).toEqual([]);
+      expect(message.text).toBe("Good morning (love)");
+    });
+
+    it("reports no emoji on a plain text message", () => {
+      expect(adapter.parseMessage(makeEvent()).emojis).toEqual([]);
+    });
+
     it("handles group source type", () => {
       const event = makeEvent({
         source: { groupId: "g-123", type: "group" },
@@ -2063,6 +2111,108 @@ describe("LineAdapter", () => {
       await expect(
         adapter.postMessage("line:bot-123:user:u-123", { location })
       ).rejects.toBeInstanceOf(AdapterRateLimitError);
+    });
+
+    const emojis = [
+      { emojiId: "001", index: 6, productId: "5ac1bfd5040ab15980c9b435" },
+    ];
+
+    it("sends emoji as a textV2 message via push", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        emojis,
+        text: "Hello $",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [
+          {
+            substitution: {
+              emoji0: {
+                emojiId: "001",
+                productId: "5ac1bfd5040ab15980c9b435",
+                type: "emoji",
+              },
+            },
+            text: "Hello {emoji0}",
+            type: "textV2",
+          },
+        ],
+        to: "u-123",
+      });
+    });
+
+    it("sends emoji to a 1:1 chat, where only mentions are barred", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        emojis,
+        text: "Hello $",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledOnce();
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          emojis: [
+            { emojiId: "001", index: 7, productId: "5ac1bfd5040ab15980c9b435" },
+          ],
+          mentions: [{ index: 0, length: 6, userId: "U1" }],
+          text: "@Alice $",
+        })
+      ).rejects.toThrow(/1:1 chats/);
+    });
+
+    it("sends emoji via reply when a token is available", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        emojis,
+        text: "Hello $",
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [expect.objectContaining({ type: "textV2" })],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("falls back to push for emoji when the reply token is rejected", async () => {
+      await seedReplyToken(adapter, { replyToken: "stale-reply-token" });
+      mocks.replyMessage.mockRejectedValueOnce(makeReplyTokenError());
+
+      await adapter.postMessage("line:bot-123:user:u-123", {
+        emojis,
+        text: "Hello $",
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [expect.objectContaining({ type: "textV2" })],
+        to: "u-123",
+      });
+    });
+
+    it("rejects an emoji that does not line up with a $ before calling LINE", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          emojis,
+          text: "Hello there",
+        })
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+    });
+
+    it("broadcasts emoji, which LINE renders outside a reply", async () => {
+      mocks.broadcastWithHttpInfo.mockResolvedValue(acceptedResponse("req-1"));
+
+      await adapter.broadcastMessages({ emojis, text: "Hello $" });
+
+      expect(mocks.broadcastWithHttpInfo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [expect.objectContaining({ type: "textV2" })],
+        }),
+        undefined
+      );
     });
 
     it("propagates provider failures for audio sends", async () => {

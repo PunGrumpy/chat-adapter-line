@@ -86,6 +86,20 @@ export interface LineLocation {
   address?: string;
 }
 
+/**
+ * A native LINE emoji on an inbound text message.
+ *
+ * `index` and `length` locate the emoji sequence inside the message text,
+ * which LINE leaves in place. `productId` names the emoji set and `emojiId`
+ * the emoji inside it.
+ */
+export interface LineEmoji {
+  index: number;
+  length: number;
+  productId: string;
+  emojiId: string;
+}
+
 /** Raw LINE webhook message event */
 export interface LineMessageEvent {
   type: "message";
@@ -104,6 +118,7 @@ export interface LineMessageEvent {
     quotedMessageId?: string;
     markAsReadToken?: string;
     duration?: number;
+    emojis?: LineEmoji[];
     packageId?: string;
     stickerId?: string;
     stickerResourceType?: LineStickerResourceType;
@@ -192,6 +207,18 @@ export interface LineMentionSegment {
   all?: boolean;
 }
 
+/**
+ * A native LINE emoji to encode into an outbound text message.
+ *
+ * `index` selects the `$` in the outbound text that LINE replaces with the
+ * emoji, so the segment needs no length of its own.
+ */
+export interface LineEmojiSegment {
+  index: number;
+  productId: string;
+  emojiId: string;
+}
+
 /** LINE-specific options accepted on outbound text messages. */
 export interface LineTextOptions {
   /**
@@ -201,6 +228,8 @@ export interface LineTextOptions {
   quoteToken?: string;
   /** Native mentions to encode into the text. */
   mentions?: LineMentionSegment[];
+  /** Native LINE emoji to substitute for `$` characters in the text. */
+  emojis?: LineEmojiSegment[];
 }
 
 /** Plain text with optional LINE quote and mention data. */
@@ -278,9 +307,9 @@ export interface LinePostableFlex {
  * Everything `LineAdapter.postMessage` accepts: the Chat SDK postables plus
  * LINE-native shapes.
  *
- * Quote tokens work on any postable that renders to text. Mentions need
- * stable character offsets, so they are only accepted on `text` and `raw`
- * postables, whose content is sent verbatim.
+ * Quote tokens work on any postable that renders to text. Mentions and
+ * emoji need stable character offsets, so they are only accepted on `text`
+ * and `raw` postables, whose content is sent verbatim.
  */
 export type LinePostableMessage =
   | AdapterPostableMessage

@@ -1,6 +1,6 @@
 # Chat SDK LINE adapter
 
-[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, quotes, Flex Messages, stickers, audio, locations, and batch messages back.
+[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, native emoji, quotes, Flex Messages, stickers, audio, locations, and batch messages back.
 
 ## Install the package
 
@@ -121,7 +121,54 @@ await thread.post(
 );
 ```
 
-The adapter encodes these as a LINE text message v2 with mention substitutions. Passing `mentions` on a Markdown, AST, card, or audio postable, in a 1:1 chat, or in a broadcast or multicast throws a `ValidationError`.
+The adapter encodes these as a LINE text message v2 with mention substitutions. Passing `mentions` on a Markdown, AST, card, Flex, audio, location, or sticker postable, in a 1:1 chat, or in a broadcast or multicast throws a `ValidationError`.
+
+### Native emoji
+
+LINE emoji are identified by a product ID and an emoji ID, not by a Unicode character. Put a `$` in the text where each one belongs and point an `emojis` entry at it:
+
+```typescript
+await thread.post(
+  linePostable({
+    text: "Ship it $",
+    emojis: [
+      { index: 8, productId: "5ac1bfd5040ab15980c9b435", emojiId: "001" },
+    ],
+  })
+);
+```
+
+The adapter encodes this as a LINE text message v2, the same shape it already uses for mentions, so one message can carry both:
+
+```typescript
+await thread.post(
+  linePostable({
+    text: "@Alice $ nice work",
+    mentions: [
+      { index: 0, length: 6, userId: "U1234567890abcdef1234567890abcdef" },
+    ],
+    emojis: [
+      { index: 7, productId: "5ac1bfd5040ab15980c9b435", emojiId: "001" },
+    ],
+  })
+);
+```
+
+Each `index` must line up with a `$`, both identifiers must be non-empty, and no two substitutions may cover the same characters, whether they are mentions or emoji. LINE accepts at most 100 substitutions in one message. Anything else throws a `ValidationError` before the adapter calls LINE. Like mentions, emoji only work on `text` and `raw` postables, because a Markdown, AST, card, Flex, audio, location, or sticker postable has no stable character offsets to anchor them to.
+
+Unlike mentions, emoji render everywhere: 1:1 chats, groups, rooms, and `broadcastMessages()` and `multicastMessages()` all take them.
+
+Inbound, `message.emojis` lists the native emoji a user sent, each with `index`, `length`, `productId`, and `emojiId`. The adapter leaves `message.text` exactly as LINE sent it, emoji sequences and all, and drops a malformed entry rather than the whole message:
+
+```typescript
+bot.onSubscribedMessage(async (thread, message) => {
+  if (message instanceof LineMessage) {
+    for (const emoji of message.emojis) {
+      console.log(emoji.productId, emoji.emojiId);
+    }
+  }
+});
+```
 
 ### Flex Messages
 

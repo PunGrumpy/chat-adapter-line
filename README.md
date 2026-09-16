@@ -230,6 +230,30 @@ The adapter checks the envelope only. LINE validates the component tree itself, 
 
 Like cards, Flex Messages cannot carry a `quoteToken` or `mentions`. Both combinations throw a `ValidationError`. Delivery uses the same reply-first, push-fallback path as text, and `broadcastMessages()` and `multicastMessages()` accept `flex` postables too.
 
+### Inbound media
+
+An image, video, audio, or file message arrives with a Chat SDK attachment that fetches the content on demand, and with `message.media` describing it without fetching anything:
+
+```typescript
+import { LineMessage } from "chat-adapter-line";
+
+bot.onSubscribedMessage(async (thread, message) => {
+  if (!(message instanceof LineMessage) || !message.media) {
+    return;
+  }
+
+  const { kind, fileName, fileSize, duration } = message.media;
+  console.log(kind, fileName, fileSize, duration);
+
+  const [attachment] = message.attachments;
+  const bytes = await attachment.fetchData?.();
+});
+```
+
+What LINE reports depends on the message: a name and size for files, a duration for audio and video, and a `contentProvider` saying whether LINE hosts the file or the sender's own app does. `providerMessageId` is LINE's ID for the message, which is what the content is fetched by. Fields LINE omits, or reports in an unusable shape, are left off rather than guessed at, and a bad one never costs you the attachment.
+
+The attachment itself now carries what the Chat SDK has slots for, so code that never touches `message.media` benefits too: `name` is the sender's file name instead of a synthetic one, `size` is the byte count, and `url` points at an externally hosted file. LINE serves its own uploads through an authenticated API rather than a public URL, so `url` stays unset for those and `fetchData()` remains the way to read them. Fetching is still deferred: nothing is downloaded while the webhook is parsed.
+
 ### Images and videos
 
 Pass an `image` or `video` object with the media URL and a thumbnail to send a native LINE image or video message:

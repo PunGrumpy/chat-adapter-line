@@ -34,6 +34,7 @@ import { deserializePostbackData } from "./lib/flex-messages.js";
 import { LineFormatConverter } from "./lib/format-converter.js";
 import { isLifecycleEvent, toLifecycleEvent } from "./lib/lifecycle-events.js";
 import { parseInboundLocation } from "./lib/locations.js";
+import { parseInboundMedia } from "./lib/media.js";
 import { parseInboundMentions } from "./lib/mentions.js";
 import {
   hasMentionSubstitution,
@@ -60,6 +61,7 @@ import type {
   LineLifecycleEvent,
   LineLifecycleHandler,
   LineLifecycleRawEvent,
+  LineMediaMetadata,
   LineMessageEvent,
   LineMulticastOptions,
   LinePostableMessage,
@@ -69,13 +71,6 @@ import type {
 } from "./types.js";
 
 export { LineFormatConverter } from "./lib/format-converter.js";
-
-const VALID_ATTACHMENT_TYPES: ReadonlySet<string> = new Set([
-  "image",
-  "video",
-  "audio",
-  "file",
-]);
 
 type RawMessageType = LineMessageEvent["message"]["type"];
 
@@ -121,14 +116,14 @@ const isLineEvent = (
   typeof event.replyToken === "string" &&
   typeof event.webhookEventId === "string";
 
-const getMimeType = (type: string): string => {
-  if (type === "image") {
+const getMimeType = (kind: LineMediaMetadata["kind"]): string => {
+  if (kind === "image") {
     return "image/jpeg";
   }
-  if (type === "video") {
+  if (kind === "video") {
     return "video/mp4";
   }
-  if (type === "audio") {
+  if (kind === "audio") {
     return "audio/mp4";
   }
   return "application/octet-stream";
@@ -506,21 +501,37 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         : undefined;
     const sticker = parseInboundSticker(raw.message);
     const location = parseInboundLocation(raw.message);
+    const media = parseInboundMedia(raw.message);
 
     const attachments: Attachment[] = [];
-    if (!isText && VALID_ATTACHMENT_TYPES.has(raw.message.type)) {
-      const messageId = raw.message.id;
-      attachments.push({
+    if (media) {
+      const messageId = media.providerMessageId;
+      const attachment: Attachment = {
         fetchData: async () => {
           const stream = await this.callLine(() =>
             this.client.getMessageContent(messageId)
           );
           return readableToBuffer(stream);
         },
-        mimeType: getMimeType(raw.message.type),
-        name: `${raw.message.type}-${messageId}`,
-        type: raw.message.type as Attachment["type"],
-      });
+        mimeType: getMimeType(media.kind),
+        name: media.fileName ?? `${media.kind}-${messageId}`,
+        type: media.kind,
+      };
+
+      if (media.fileSize !== undefined) {
+        attachment.size = media.fileSize;
+      }
+
+      // LINE hosts its own uploads behind the authenticated content API, so a
+      // URL only exists when the sender's app hosted the file itself.
+      if (
+        media.contentProvider?.type === "external" &&
+        media.contentProvider.originalContentUrl !== undefined
+      ) {
+        attachment.url = media.contentProvider.originalContentUrl;
+      }
+
+      attachments.push(attachment);
     }
 
     return new LineMessage({
@@ -531,6 +542,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       id: raw.webhookEventId,
       isMention: mentionsBot,
       location,
+      media,
       mentions,
       metadata: {
         dateSent: new Date(raw.timestamp),

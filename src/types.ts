@@ -100,6 +100,36 @@ export interface LineEmoji {
   emojiId: string;
 }
 
+/** Where LINE says the bytes behind an inbound media message live. */
+export interface LineContentProvider {
+  /** `line` when LINE hosts the file, `external` when the sender's app does. */
+  type: "line" | "external";
+  /** The file itself, on an `external` provider. */
+  originalContentUrl?: string;
+  /** The thumbnail, on an `external` provider. */
+  previewImageUrl?: string;
+}
+
+/**
+ * Provider metadata for an inbound LINE image, video, audio, or file message.
+ *
+ * Every field beyond the ID and kind depends on the message type: LINE sends
+ * a name and size only for files, and a duration only for audio and video.
+ * The adapter reports what arrived and fetches nothing.
+ */
+export interface LineMediaMetadata {
+  /** LINE's ID for the message carrying the media, used to fetch it. */
+  providerMessageId: string;
+  kind: "image" | "video" | "audio" | "file";
+  /** Name the sender's device gave the file. */
+  fileName?: string;
+  /** Size of the file in bytes. */
+  fileSize?: number;
+  /** Length of the audio or video in milliseconds. */
+  duration?: number;
+  contentProvider?: LineContentProvider;
+}
+
 /** Who a LINE webhook event came from. */
 export interface LineEventSource {
   type: "user" | "group" | "room";
@@ -126,6 +156,8 @@ export interface LineMessageEvent {
     quotedMessageId?: string;
     markAsReadToken?: string;
     duration?: number;
+    fileName?: string;
+    fileSize?: number;
     emojis?: LineEmoji[];
     packageId?: string;
     stickerId?: string;
@@ -138,11 +170,7 @@ export interface LineMessageEvent {
     mention?: {
       mentionees: LineMention[];
     };
-    contentProvider?: {
-      type: "line" | "external";
-      originalContentUrl?: string;
-      previewImageUrl?: string;
-    };
+    contentProvider?: LineContentProvider;
   };
   timestamp: number;
   source: LineEventSource;

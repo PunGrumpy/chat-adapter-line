@@ -5,6 +5,7 @@ import type {
   LineEmoji,
   LineEvent,
   LineLocation,
+  LineMediaMetadata,
   LineMention,
   LineSticker,
 } from "./types.js";
@@ -12,6 +13,7 @@ import type {
 export interface LineMessageData extends MessageData<LineEvent> {
   emojis: LineEmoji[];
   location?: LineLocation;
+  media?: LineMediaMetadata;
   mentions: LineMention[];
   quoteToken?: string;
   quotedMessageId?: string;
@@ -34,6 +36,13 @@ export class LineMessage extends Message<LineEvent> {
    * and address to send it back on a `location` postable.
    */
   readonly location?: LineLocation;
+
+  /**
+   * Provider metadata for the image, video, audio, or file this message
+   * carries. `attachments[0]` fetches the content itself; this describes it
+   * without fetching anything.
+   */
+  readonly media?: LineMediaMetadata;
 
   /** Native mentions on this message, in the order LINE reported them. */
   readonly mentions: LineMention[];
@@ -62,6 +71,7 @@ export class LineMessage extends Message<LineEvent> {
     super(data);
     this.emojis = data.emojis;
     this.location = data.location;
+    this.media = data.media;
     this.mentions = data.mentions;
     this.quoteToken = data.quoteToken;
     this.quotedMessageId = data.quotedMessageId;

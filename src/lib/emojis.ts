@@ -5,16 +5,11 @@ import type {
   LineEmojiSegment,
   LineMessageEvent,
 } from "../types.js";
+import { isNonEmptyString, isNonNegativeInteger } from "./guards.js";
 import { isRecord } from "./is-record.js";
 
 /** LINE stands one native emoji in for a single `$` in the text it sends. */
 export const EMOJI_PLACEHOLDER = "$";
-
-const isPosition = (value: unknown): value is number =>
-  typeof value === "number" && Number.isInteger(value) && value >= 0;
-
-const isIdentifier = (value: unknown): value is string =>
-  typeof value === "string" && value !== "";
 
 /**
  * Reads LINE's `emojis` array off an inbound text message.
@@ -38,12 +33,12 @@ export const parseInboundEmojis = (
   for (const entry of entries) {
     if (
       !isRecord(entry) ||
-      !isPosition(entry.index) ||
-      !isPosition(entry.length) ||
+      !isNonNegativeInteger(entry.index) ||
+      !isNonNegativeInteger(entry.length) ||
       entry.length === 0 ||
       entry.index + entry.length > text.length ||
-      !isIdentifier(entry.productId) ||
-      !isIdentifier(entry.emojiId)
+      !isNonEmptyString(entry.productId) ||
+      !isNonEmptyString(entry.emojiId)
     ) {
       continue;
     }
@@ -60,7 +55,7 @@ export const parseInboundEmojis = (
 };
 
 const validateSegment = (segment: LineEmojiSegment, text: string): void => {
-  if (!isPosition(segment.index)) {
+  if (!isNonNegativeInteger(segment.index)) {
     throw new ValidationError(
       "line",
       `Emoji index must be a non-negative integer, got ${String(segment.index)}`
@@ -81,14 +76,14 @@ const validateSegment = (segment: LineEmojiSegment, text: string): void => {
     );
   }
 
-  if (!isIdentifier(segment.productId)) {
+  if (!isNonEmptyString(segment.productId)) {
     throw new ValidationError(
       "line",
       "Each emoji must set a non-empty `productId`"
     );
   }
 
-  if (!isIdentifier(segment.emojiId)) {
+  if (!isNonEmptyString(segment.emojiId)) {
     throw new ValidationError(
       "line",
       "Each emoji must set a non-empty `emojiId`"

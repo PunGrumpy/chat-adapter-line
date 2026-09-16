@@ -1,7 +1,12 @@
 import { ValidationError } from "@chat-adapter/shared";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildAudioMessage, buildMediaMessage } from "../../src/lib/media.js";
+import {
+  buildAudioMessage,
+  buildMediaMessage,
+  parseInboundMedia,
+} from "../../src/lib/media.js";
+import type { LineMessageEvent } from "../../src/types.js";
 
 const ORIGINAL = "https://example.com/original.mp4";
 const PREVIEW = "https://example.com/preview.jpg";
@@ -99,5 +104,127 @@ describe("buildMediaMessage", () => {
     expect(() =>
       buildMediaMessage({ previewImageUrl: PREVIEW }, "video")
     ).toThrow(/video\.originalContentUrl/);
+  });
+});
+
+type RawMessage = LineMessageEvent["message"];
+
+const mediaMessage = (overrides: Partial<RawMessage> = {}): RawMessage =>
+  ({ id: "img-1", type: "image", ...overrides }) as RawMessage;
+
+describe("parseInboundMedia", () => {
+  it.each(["image", "video", "audio", "file"] as const)(
+    "reports the ID and kind of a %s message",
+    (kind) => {
+      expect(
+        parseInboundMedia(mediaMessage({ id: "m-1", type: kind }))
+      ).toEqual({ kind, providerMessageId: "m-1" });
+    }
+  );
+
+  it.each([
+    ["text", { id: "msg-1", text: "hi", type: "text" as const }],
+    ["location", { id: "loc-1", type: "location" as const }],
+    ["sticker", { id: "stk-1", type: "sticker" as const }],
+  ])("returns undefined for a %s message", (_label, message) => {
+    expect(parseInboundMedia(message as RawMessage)).toBeUndefined();
+  });
+
+  it("returns undefined for a media message with no ID", () => {
+    expect(parseInboundMedia(mediaMessage({ id: "" }))).toBeUndefined();
+  });
+
+  it("keeps the name and size of a file", () => {
+    expect(
+      parseInboundMedia(
+        mediaMessage({
+          fileName: "report.pdf",
+          fileSize: 138_024,
+          id: "file-1",
+          type: "file",
+        })
+      )
+    ).toEqual({
+      fileName: "report.pdf",
+      fileSize: 138_024,
+      kind: "file",
+      providerMessageId: "file-1",
+    });
+  });
+
+  it("accepts a zero-byte file", () => {
+    expect(
+      parseInboundMedia(
+        mediaMessage({ fileSize: 0, id: "file-1", type: "file" })
+      )?.fileSize
+    ).toBe(0);
+  });
+
+  it.each(["audio", "video"] as const)("keeps the duration of %s", (kind) => {
+    expect(
+      parseInboundMedia(
+        mediaMessage({ duration: 60_000, id: "m-1", type: kind })
+      )?.duration
+    ).toBe(60_000);
+  });
+
+  it("keeps a LINE content provider", () => {
+    expect(
+      parseInboundMedia(mediaMessage({ contentProvider: { type: "line" } }))
+        ?.contentProvider
+    ).toEqual({ type: "line" });
+  });
+
+  it("keeps an external content provider and its URLs", () => {
+    expect(
+      parseInboundMedia(
+        mediaMessage({
+          contentProvider: {
+            originalContentUrl: "https://example.com/original.jpg",
+            previewImageUrl: "https://example.com/preview.jpg",
+            type: "external",
+          },
+        })
+      )?.contentProvider
+    ).toEqual({
+      originalContentUrl: "https://example.com/original.jpg",
+      previewImageUrl: "https://example.com/preview.jpg",
+      type: "external",
+    });
+  });
+
+  it.each([
+    ["an empty fileName", { fileName: "" }],
+    ["a non-string fileName", { fileName: 42 }],
+    ["a negative fileSize", { fileSize: -1 }],
+    ["a fractional fileSize", { fileSize: 1.5 }],
+    ["a NaN fileSize", { fileSize: Number.NaN }],
+    ["a zero duration", { duration: 0 }],
+    ["a negative duration", { duration: -1 }],
+    ["an infinite duration", { duration: Number.POSITIVE_INFINITY }],
+    ["a provider of an unknown type", { contentProvider: { type: "s3" } }],
+    ["a provider that is not an object", { contentProvider: "line" }],
+  ])("drops %s but keeps the attachment", (_label, overrides) => {
+    expect(parseInboundMedia(mediaMessage(overrides as never))).toEqual({
+      kind: "image",
+      providerMessageId: "img-1",
+    });
+  });
+
+  it("drops only the unusable URL of a provider", () => {
+    expect(
+      parseInboundMedia(
+        mediaMessage({
+          contentProvider: {
+            originalContentUrl: "https://example.com/original.jpg",
+            previewImageUrl: "",
+            type: "external",
+          },
+        })
+      )?.contentProvider
+    ).toEqual({
+      originalContentUrl: "https://example.com/original.jpg",
+      type: "external",
+    });
   });
 });

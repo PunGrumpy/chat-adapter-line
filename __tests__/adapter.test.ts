@@ -1,5 +1,6 @@
 /* eslint-disable max-classes-per-file */
 import crypto from "node:crypto";
+import { Readable } from "node:stream";
 
 import {
   AdapterRateLimitError,
@@ -1317,6 +1318,120 @@ describe("LineAdapter", () => {
 
       expect(parsed.quotedMessageId).toBe("468789532432007169");
       expect(parsed.quoteToken).toBeUndefined();
+    });
+
+    it("exposes media metadata alongside the attachment", () => {
+      const event = makeEvent({
+        message: {
+          contentProvider: { type: "line" },
+          duration: 60_000,
+          id: "vid-1",
+          type: "video",
+        },
+      } as never);
+      const message = adapter.parseMessage(event);
+
+      expect(message.media).toEqual({
+        contentProvider: { type: "line" },
+        duration: 60_000,
+        kind: "video",
+        providerMessageId: "vid-1",
+      });
+      expect(message.attachments).toHaveLength(1);
+      expect(message.attachments[0]).toMatchObject({
+        mimeType: "video/mp4",
+        type: "video",
+      });
+    });
+
+    it("names the attachment after the file LINE reported", () => {
+      const event = makeEvent({
+        message: {
+          fileName: "report.pdf",
+          fileSize: 138_024,
+          id: "file-1",
+          type: "file",
+        },
+      } as never);
+      const message = adapter.parseMessage(event);
+
+      expect(message.attachments[0]).toMatchObject({
+        name: "report.pdf",
+        size: 138_024,
+        type: "file",
+      });
+    });
+
+    it("falls back to a synthetic name when LINE reports none", () => {
+      const event = makeEvent({
+        message: { id: "img-1", type: "image" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      expect(attachment.name).toBe("image-img-1");
+      expect(attachment.size).toBeUndefined();
+      expect(attachment.url).toBeUndefined();
+    });
+
+    it("links the attachment to an externally hosted file", () => {
+      const event = makeEvent({
+        message: {
+          contentProvider: {
+            originalContentUrl: "https://example.com/original.jpg",
+            previewImageUrl: "https://example.com/preview.jpg",
+            type: "external",
+          },
+          id: "img-1",
+          type: "image",
+        },
+      } as never);
+
+      expect(adapter.parseMessage(event).attachments[0].url).toBe(
+        "https://example.com/original.jpg"
+      );
+    });
+
+    it("leaves the URL unset when LINE hosts the file itself", () => {
+      const event = makeEvent({
+        message: {
+          contentProvider: { type: "line" },
+          id: "img-1",
+          type: "image",
+        },
+      } as never);
+
+      expect(adapter.parseMessage(event).attachments[0].url).toBeUndefined();
+    });
+
+    it("still fetches content lazily through the LINE client", async () => {
+      mocks.getMessageContent.mockResolvedValue(
+        Readable.from([Buffer.from("file-bytes")])
+      );
+      const event = makeEvent({
+        message: { fileName: "report.pdf", id: "file-1", type: "file" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      expect(mocks.getMessageContent).not.toHaveBeenCalled();
+
+      const data = await attachment.fetchData?.();
+
+      expect(mocks.getMessageContent).toHaveBeenCalledWith("file-1");
+      expect(data?.toString()).toBe("file-bytes");
+    });
+
+    it("drops the attachment when a media message carries no ID", () => {
+      const event = makeEvent({
+        message: { id: "", type: "image" },
+      } as never);
+      const message = adapter.parseMessage(event);
+
+      expect(message.attachments).toHaveLength(0);
+      expect(message.media).toBeUndefined();
+    });
+
+    it("reports no media on a text message", () => {
+      expect(adapter.parseMessage(makeEvent()).media).toBeUndefined();
     });
 
     it("handles group source type", () => {

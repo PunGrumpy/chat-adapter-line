@@ -7,6 +7,7 @@ import { buildFlexMessage, buildNativeFlexMessage } from "./flex-messages.js";
 import type { LineFormatConverter } from "./format-converter.js";
 import { isRecord } from "./is-record.js";
 import { buildTextMessage } from "./mentions.js";
+import { buildStickerMessage } from "./stickers.js";
 import { toPlainText } from "./to-plain-text.js";
 
 /** LINE accepts at most five message objects per send request. */
@@ -115,10 +116,10 @@ const buildAudioMessage = (audio: unknown): messagingApi.AudioMessage => {
 /**
  * Converts one postable into LINE Messaging API message objects.
  *
- * Cards and `flex` payloads become Flex Messages, audio becomes a native
- * audio message, and everything else renders to text. Quote tokens and mentions are only
- * accepted where LINE can carry them; other combinations throw instead of
- * silently dropping the LINE-specific data.
+ * Cards and `flex` payloads become Flex Messages, audio and stickers become
+ * native messages of their own, and everything else renders to text. Quote
+ * tokens and mentions are only accepted where LINE can carry them; other
+ * combinations throw instead of silently dropping the LINE-specific data.
  */
 export const toLineMessages = (
   message: LinePostableMessage,
@@ -151,6 +152,11 @@ export const toLineMessages = (
     rejectQuote(options, "audio");
     rejectMentions(options, "audio");
     return [buildAudioMessage(message.audio)];
+  }
+
+  if ("sticker" in message) {
+    rejectMentions(options, "sticker");
+    return [buildStickerMessage(message.sticker, options)];
   }
 
   if (typeof message.text === "string") {

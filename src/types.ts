@@ -38,6 +38,41 @@ export interface LineMention {
   isSelf?: boolean;
 }
 
+/**
+ * How LINE renders a sticker.
+ *
+ * `CUSTOM`, `MESSAGE`, `NAME_TEXT`, and `PER_STICKER_TEXT` stickers carry
+ * text the sender typed, which puts them outside the sticker definitions a
+ * bot can send.
+ */
+export type LineStickerResourceType =
+  | "STATIC"
+  | "ANIMATION"
+  | "SOUND"
+  | "ANIMATION_SOUND"
+  | "POPUP"
+  | "POPUP_SOUND"
+  | "CUSTOM"
+  | "MESSAGE"
+  | "NAME_TEXT"
+  | "PER_STICKER_TEXT";
+
+/**
+ * The sticker on an inbound LINE sticker message.
+ *
+ * `packageId` and `stickerId` identify the sticker. `keywords` describes it
+ * in words, and LINE returns at most 15 of them, picked at random for each
+ * event when the sticker has more. `text` is the sender's own text, which
+ * only the personalized resource types carry.
+ */
+export interface LineSticker {
+  packageId: string;
+  stickerId: string;
+  resourceType?: LineStickerResourceType;
+  keywords?: string[];
+  text?: string;
+}
+
 /** Raw LINE webhook message event */
 export interface LineMessageEvent {
   type: "message";
@@ -56,6 +91,10 @@ export interface LineMessageEvent {
     quotedMessageId?: string;
     markAsReadToken?: string;
     duration?: number;
+    packageId?: string;
+    stickerId?: string;
+    stickerResourceType?: LineStickerResourceType;
+    keywords?: string[];
     mention?: {
       mentionees: LineMention[];
     };
@@ -163,6 +202,29 @@ export interface LinePostableAudio {
 }
 
 /**
+ * Native LINE sticker message.
+ *
+ * A bot can only send the stickers in LINE's sticker definitions, listed at
+ * https://developers.line.biz/en/docs/messaging-api/sticker-list/.
+ */
+export interface LinePostableSticker {
+  sticker: {
+    packageId: string;
+    stickerId: string;
+    /**
+     * Resource type, so an inbound `LineMessage.sticker` can be passed back
+     * unchanged. The adapter rejects the types LINE cannot send.
+     */
+    resourceType?: LineStickerResourceType;
+  };
+  /**
+   * Quote token of the message to quote. Unlike cards, Flex Messages, and
+   * audio, a LINE sticker can carry a quote.
+   */
+  quoteToken?: string;
+}
+
+/**
  * Native LINE Flex Message.
  *
  * The adapter sends `contents` to LINE untouched, so this shape covers the
@@ -191,6 +253,7 @@ export type LinePostableMessage =
   | LinePostableText
   | LinePostableAudio
   | LinePostableFlex
+  | LinePostableSticker
   | (PostableRaw & LineTextOptions)
   | (PostableMarkdown & Pick<LineTextOptions, "quoteToken">)
   | (PostableAst & Pick<LineTextOptions, "quoteToken">);

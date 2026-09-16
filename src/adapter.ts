@@ -40,6 +40,7 @@ import {
   validateRetryKey,
 } from "./lib/outbound.js";
 import { ReplyTokenStore } from "./lib/reply-token-store.js";
+import { parseInboundSticker } from "./lib/stickers.js";
 import {
   decodeThreadId,
   encodeThreadId,
@@ -412,6 +413,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       typeof raw.message.quoteToken === "string"
         ? raw.message.quoteToken
         : undefined;
+    const sticker = parseInboundSticker(raw.message);
 
     const attachments: Attachment[] = [];
     if (!isText && VALID_ATTACHMENT_TYPES.has(raw.message.type)) {
@@ -442,6 +444,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       },
       quoteToken,
       raw,
+      sticker,
       text,
       threadId,
     });

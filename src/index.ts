@@ -71,9 +71,12 @@ export type {
   LinePostableAudio,
   LinePostableFlex,
   LinePostableMessage,
+  LinePostableSticker,
   LinePostableText,
   LinePostbackEvent,
   LineRawMessage,
+  LineSticker,
+  LineStickerResourceType,
   LineTextOptions,
   LineThreadId,
   LineWebhookPayload,
@@ -87,4 +90,5 @@ export {
   serializePostbackData,
 } from "./lib/flex-messages.js";
 export { buildTextMessage } from "./lib/mentions.js";
+export { buildStickerMessage, parseInboundSticker } from "./lib/stickers.js";
 export { linePostable, toLineMessages } from "./lib/outbound.js";

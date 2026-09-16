@@ -1,0 +1,7 @@
+---
+"chat-adapter-line": patch
+---
+
+Support native LINE stickers in both directions. An inbound sticker message now exposes `LineMessage.sticker` with `packageId`, `stickerId`, the `resourceType`, up to 15 `keywords`, and the text the sender typed on a personalized sticker, so a bot can classify a sticker without reading the raw webhook payload. Webhook parsing never downloads or transforms the sticker image, and a sticker event missing either ID leaves `sticker` unset instead of failing the parse. Unknown resource types and non-string keywords are dropped, so a sticker kind LINE adds later still arrives with its identity intact.
+
+Outbound, `postMessage()` accepts `{ sticker: { packageId, stickerId } }` and sends a native LINE sticker message over the same reply-first, push-fallback path as text, so an inbound `message.sticker` can be passed straight back. Both IDs must be decimal strings from LINE's sticker definitions, and the `CUSTOM`, `MESSAGE`, `NAME_TEXT`, and `PER_STICKER_TEXT` resource types throw a `ValidationError` rather than sending a different sticker under the same IDs. A sticker can carry a `quoteToken`, which a card, Flex Message, or audio message cannot, while `mentions` throws. Broadcast and multicast accept the new shape too. The public exports now include the `LinePostableSticker`, `LineSticker`, and `LineStickerResourceType` types and the `buildStickerMessage` and `parseInboundSticker` helpers.

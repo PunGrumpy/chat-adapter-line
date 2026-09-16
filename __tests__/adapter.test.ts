@@ -848,6 +848,67 @@ describe("LineAdapter", () => {
       });
     });
 
+    it("exposes the place on a location message", () => {
+      const event = makeEvent({
+        message: {
+          address: "1-3 Kioicho, Chiyoda-ku, Tokyo, 102-8282, Japan",
+          id: "loc-1",
+          latitude: 35.679_66,
+          longitude: 139.736_69,
+          title: "my location",
+          type: "location",
+        },
+      } as never);
+      const message = adapter.parseMessage(event);
+
+      expect(message.location).toEqual({
+        address: "1-3 Kioicho, Chiyoda-ku, Tokyo, 102-8282, Japan",
+        latitude: 35.679_66,
+        longitude: 139.736_69,
+        title: "my location",
+      });
+      expect(message.id).toBe("evt-1");
+      expect(message.text).toBe("");
+      expect(message.attachments).toHaveLength(0);
+    });
+
+    it("leaves the location unset on out-of-range coordinates", () => {
+      const event = makeEvent({
+        message: {
+          id: "loc-1",
+          latitude: 91,
+          longitude: 139.736_69,
+          type: "location",
+        },
+      } as never);
+
+      expect(adapter.parseMessage(event).location).toBeUndefined();
+    });
+
+    it("leaves the location unset on a text message", () => {
+      expect(adapter.parseMessage(makeEvent()).location).toBeUndefined();
+    });
+
+    it.each([
+      ["group", { source: { groupId: "g-123", type: "group" as const } }],
+      ["room", { source: { roomId: "r-123", type: "room" as const } }],
+    ])("reads a location from a %s source", (_label, overrides) => {
+      const event = makeEvent({
+        message: {
+          id: "loc-1",
+          latitude: 35.679_66,
+          longitude: 139.736_69,
+          type: "location",
+        },
+        ...overrides,
+      } as never);
+
+      expect(adapter.parseMessage(event).location).toEqual({
+        latitude: 35.679_66,
+        longitude: 139.736_69,
+      });
+    });
+
     it("handles group source type", () => {
       const event = makeEvent({
         source: { groupId: "g-123", type: "group" },
@@ -1909,6 +1970,99 @@ describe("LineAdapter", () => {
       await expect(
         adapter.postMessage("line:bot-123:user:u-123", { sticker })
       ).rejects.toThrow("LINE is down");
+    });
+
+    const location = {
+      address: "1-3 Kioicho, Chiyoda-ku, Tokyo, 102-8282, Japan",
+      latitude: 35.679_66,
+      longitude: 139.736_69,
+      title: "my location",
+    };
+
+    it("sends a native location message via push", async () => {
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        location,
+      });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ ...location, type: "location" }],
+        to: "u-123",
+      });
+      expect(result.id).toBe("pushed-1");
+    });
+
+    it("sends a native location message via reply when a token is available", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        location,
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ ...location, type: "location" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(result.id).toBe("replied-1");
+    });
+
+    it("falls back to push for a location when the reply token is rejected", async () => {
+      await seedReplyToken(adapter, { replyToken: "stale-reply-token" });
+      mocks.replyMessage.mockRejectedValueOnce(makeReplyTokenError());
+
+      await adapter.postMessage("line:bot-123:user:u-123", { location });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ ...location, type: "location" }],
+        to: "u-123",
+      });
+    });
+
+    it.each([
+      ["an empty title", { ...location, title: "" }],
+      ["a missing address", { ...location, address: undefined }],
+      ["a latitude past the pole", { ...location, latitude: 91 }],
+      ["a longitude past the antimeridian", { ...location, longitude: 181 }],
+      ["a NaN latitude", { ...location, latitude: Number.NaN }],
+    ])(
+      "rejects a location with %s before calling LINE",
+      async (_label, bad) => {
+        await expect(
+          adapter.postMessage("line:bot-123:user:u-123", {
+            location: bad,
+          } as never)
+        ).rejects.toBeInstanceOf(ValidationError);
+
+        expect(mocks.pushMessage).not.toHaveBeenCalled();
+        expect(mocks.replyMessage).not.toHaveBeenCalled();
+      }
+    );
+
+    it("rejects a quote token on a location send before calling LINE", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", {
+          location,
+          quoteToken: "qt-1",
+        } as never)
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("propagates provider failures for location sends", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { location })
+      ).rejects.toThrow("LINE is down");
+    });
+
+    it("maps a 429 on a location send to AdapterRateLimitError", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(makeRateLimitError(3));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { location })
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
     });
 
     it("propagates provider failures for audio sends", async () => {

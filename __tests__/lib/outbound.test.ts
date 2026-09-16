@@ -144,6 +144,55 @@ describe("toLineMessages", () => {
     ).toThrow(ValidationError);
   });
 
+  it("converts a location to a native location message", () => {
+    expect(
+      toLineMessages(
+        {
+          location: {
+            address: "1-3 Kioicho, Chiyoda-ku, Tokyo, 102-8282, Japan",
+            latitude: 35.679_66,
+            longitude: 139.736_69,
+            title: "my location",
+          },
+        },
+        converter
+      )
+    ).toEqual([
+      {
+        address: "1-3 Kioicho, Chiyoda-ku, Tokyo, 102-8282, Japan",
+        latitude: 35.679_66,
+        longitude: 139.736_69,
+        title: "my location",
+        type: "location",
+      },
+    ]);
+  });
+
+  it("rejects quote tokens and mentions on a location postable", () => {
+    const location = {
+      address: "Kioicho",
+      latitude: 35.679_66,
+      longitude: 139.736_69,
+      title: "my location",
+    };
+
+    expect(() =>
+      toLineMessages({ location, quoteToken: "q" } as never, converter)
+    ).toThrow(ValidationError);
+    expect(() =>
+      toLineMessages(
+        { location, mentions: [{ index: 0, length: 1, userId: "u" }] } as never,
+        converter
+      )
+    ).toThrow(ValidationError);
+  });
+
+  it("rejects a location that is not an object", () => {
+    expect(() =>
+      toLineMessages({ location: "Tokyo" } as never, converter)
+    ).toThrow(ValidationError);
+  });
+
   it("rejects an audio URL longer than 2000 characters", () => {
     const originalContentUrl = `https://example.com/${"a".repeat(2000)}`;
 

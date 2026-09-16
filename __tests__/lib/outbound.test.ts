@@ -270,6 +270,61 @@ describe("toLineMessages", () => {
     }
   );
 
+  it.each(["image", "video"] as const)(
+    "converts a %s postable to a native message",
+    (type) => {
+      expect(
+        toLineMessages(
+          {
+            [type]: {
+              originalContentUrl: "https://example.com/original.mp4",
+              previewImageUrl: "https://example.com/preview.jpg",
+            },
+          } as never,
+          converter
+        )
+      ).toEqual([
+        {
+          originalContentUrl: "https://example.com/original.mp4",
+          previewImageUrl: "https://example.com/preview.jpg",
+          type,
+        },
+      ]);
+    }
+  );
+
+  it.each(["image", "video"] as const)(
+    "rejects quote tokens, mentions, and emoji on a %s postable",
+    (type) => {
+      const media = {
+        originalContentUrl: "https://example.com/original.mp4",
+        previewImageUrl: "https://example.com/preview.jpg",
+      };
+
+      expect(() =>
+        toLineMessages({ [type]: media, quoteToken: "q" } as never, converter)
+      ).toThrow(ValidationError);
+      expect(() =>
+        toLineMessages(
+          {
+            [type]: media,
+            mentions: [{ index: 0, length: 1, userId: "u" }],
+          } as never,
+          converter
+        )
+      ).toThrow(ValidationError);
+      expect(() =>
+        toLineMessages(
+          {
+            [type]: media,
+            emojis: [{ emojiId: "001", index: 0, productId: "p" }],
+          } as never,
+          converter
+        )
+      ).toThrow(ValidationError);
+    }
+  );
+
   it("rejects an audio URL longer than 2000 characters", () => {
     const originalContentUrl = `https://example.com/${"a".repeat(2000)}`;
 

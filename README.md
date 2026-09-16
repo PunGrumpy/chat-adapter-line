@@ -1,6 +1,6 @@
 # Chat SDK LINE adapter
 
-[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, native emoji, quotes, Flex Messages, stickers, audio, locations, and batch messages back. It also reports LINE's lifecycle events, from a new follower to a member leaving a group.
+[LINE Messaging API](https://developers.line.biz/en/docs/messaging-api/) adapter for [Chat SDK](https://chat-sdk.dev/). It receives webhook events from your LINE bot and sends replies, mentions, native emoji, quotes, Flex Messages, stickers, images, videos, audio, locations, and batch messages back. It also reports LINE's lifecycle events, from a new follower to a member leaving a group.
 
 ## Install the package
 
@@ -229,6 +229,34 @@ await thread.post(
 The adapter checks the envelope only. LINE validates the component tree itself, and you know which schema level your payload targets.
 
 Like cards, Flex Messages cannot carry a `quoteToken` or `mentions`. Both combinations throw a `ValidationError`. Delivery uses the same reply-first, push-fallback path as text, and `broadcastMessages()` and `multicastMessages()` accept `flex` postables too.
+
+### Images and videos
+
+Pass an `image` or `video` object with the media URL and a thumbnail to send a native LINE image or video message:
+
+```typescript
+await thread.post(
+  linePostable({
+    image: {
+      originalContentUrl: "https://example.com/photo.jpg",
+      previewImageUrl: "https://example.com/photo-thumb.jpg",
+    },
+  })
+);
+
+await thread.post(
+  linePostable({
+    video: {
+      originalContentUrl: "https://example.com/clip.mp4",
+      previewImageUrl: "https://example.com/clip-thumb.jpg",
+    },
+  })
+);
+```
+
+LINE fetches both URLs itself rather than taking bytes from the bot, so each must be HTTPS and at most 2000 characters, and the host has to be reachable from the internet. A missing, non-HTTPS, or over-long URL throws a `ValidationError` before the adapter calls LINE. Images and videos use the same reply-first, push-fallback delivery as text, and `broadcastMessages()` and `multicastMessages()` accept them too. LINE cannot quote from either, so a `quoteToken`, `mentions`, or `emojis` on one throws, as it does on a card.
+
+Hosting and transcoding are yours to handle. The adapter never uploads a file or generates a thumbnail.
 
 ### Audio messages
 

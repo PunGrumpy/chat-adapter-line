@@ -304,6 +304,29 @@ export interface LinePostableText extends LineTextOptions {
   text: string;
 }
 
+/**
+ * The pair of URLs a LINE image or video message points at.
+ *
+ * LINE fetches both itself rather than taking bytes from the bot, so each
+ * must be an HTTPS URL of at most 2000 characters that LINE can reach.
+ */
+export interface LineMediaUrls {
+  /** The full-size image, or the video file. */
+  originalContentUrl: string;
+  /** The thumbnail shown in the chat before the media loads. */
+  previewImageUrl: string;
+}
+
+/** Native LINE image message. */
+export interface LinePostableImage {
+  image: LineMediaUrls;
+}
+
+/** Native LINE video message. */
+export interface LinePostableVideo {
+  video: LineMediaUrls;
+}
+
 /** Native LINE audio message. */
 export interface LinePostableAudio {
   audio: {
@@ -383,8 +406,10 @@ export type LinePostableMessage =
   | LinePostableText
   | LinePostableAudio
   | LinePostableFlex
+  | LinePostableImage
   | LinePostableLocation
   | LinePostableSticker
+  | LinePostableVideo
   | (PostableRaw & LineTextOptions)
   | (PostableMarkdown & Pick<LineTextOptions, "quoteToken">)
   | (PostableAst & Pick<LineTextOptions, "quoteToken">);

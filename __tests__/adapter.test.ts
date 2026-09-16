@@ -2577,6 +2577,117 @@ describe("LineAdapter", () => {
       );
     });
 
+    const media = {
+      originalContentUrl: "https://example.com/original.mp4",
+      previewImageUrl: "https://example.com/preview.jpg",
+    };
+
+    it.each(["image", "video"] as const)(
+      "sends a native %s message via push",
+      async (type) => {
+        const result = await adapter.postMessage("line:bot-123:user:u-123", {
+          [type]: media,
+        } as never);
+
+        expect(mocks.pushMessage).toHaveBeenCalledWith({
+          messages: [{ ...media, type }],
+          to: "u-123",
+        });
+        expect(result.id).toBe("pushed-1");
+      }
+    );
+
+    it.each(["image", "video"] as const)(
+      "sends a native %s message via reply when a token is available",
+      async (type) => {
+        await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+        await adapter.postMessage("line:bot-123:user:u-123", {
+          [type]: media,
+        } as never);
+
+        expect(mocks.replyMessage).toHaveBeenCalledWith({
+          messages: [{ ...media, type }],
+          replyToken: "fresh-reply-token",
+        });
+        expect(mocks.pushMessage).not.toHaveBeenCalled();
+      }
+    );
+
+    it("falls back to push for an image when the reply token is rejected", async () => {
+      await seedReplyToken(adapter, { replyToken: "stale-reply-token" });
+      mocks.replyMessage.mockRejectedValueOnce(makeReplyTokenError());
+
+      await adapter.postMessage("line:bot-123:user:u-123", { image: media });
+
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ ...media, type: "image" }],
+        to: "u-123",
+      });
+    });
+
+    it.each([
+      [
+        "a missing previewImageUrl",
+        { originalContentUrl: media.originalContentUrl },
+      ],
+      [
+        "an http URL",
+        { ...media, originalContentUrl: "http://example.com/o.mp4" },
+      ],
+      ["an empty URL", { ...media, previewImageUrl: "" }],
+      ["a non-object", "https://example.com/o.mp4"],
+    ])("rejects a video with %s before calling LINE", async (_label, bad) => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { video: bad } as never)
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+    });
+
+    it("propagates provider failures for image sends", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { image: media })
+      ).rejects.toThrow("LINE is down");
+    });
+
+    it("maps a 429 on a video send to AdapterRateLimitError", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(makeRateLimitError(3));
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", { video: media })
+      ).rejects.toBeInstanceOf(AdapterRateLimitError);
+    });
+
+    it.each(["image", "video"] as const)(
+      "broadcasts and multicasts a %s postable",
+      async (type) => {
+        mocks.broadcastWithHttpInfo.mockResolvedValue(
+          acceptedResponse("req-1")
+        );
+        mocks.multicastWithHttpInfo.mockResolvedValue(
+          acceptedResponse("req-2")
+        );
+
+        await adapter.broadcastMessages({ [type]: media } as never);
+        await adapter.multicastMessages(["U1234567890abcdef1234567890abcdef"], {
+          [type]: media,
+        } as never);
+
+        expect(mocks.broadcastWithHttpInfo).toHaveBeenCalledWith(
+          expect.objectContaining({ messages: [{ ...media, type }] }),
+          undefined
+        );
+        expect(mocks.multicastWithHttpInfo).toHaveBeenCalledWith(
+          expect.objectContaining({ messages: [{ ...media, type }] }),
+          undefined
+        );
+      }
+    );
+
     it("propagates provider failures for audio sends", async () => {
       mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));
 

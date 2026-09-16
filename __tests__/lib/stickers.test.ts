@@ -147,11 +147,21 @@ describe("buildStickerMessage", () => {
     }
   );
 
-  it("rejects an unknown resource type", () => {
-    expect(() =>
+  it("lets a resource type it does not know through", () => {
+    expect(
       buildStickerMessage({
         packageId: "446",
         resourceType: "HOLOGRAM",
+        stickerId: "1988",
+      })
+    ).toEqual({ packageId: "446", stickerId: "1988", type: "sticker" });
+  });
+
+  it("rejects a resource type that is not a string", () => {
+    expect(() =>
+      buildStickerMessage({
+        packageId: "446",
+        resourceType: 42,
         stickerId: "1988",
       })
     ).toThrow(ValidationError);

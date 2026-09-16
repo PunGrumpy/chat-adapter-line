@@ -2477,7 +2477,7 @@ describe("LineAdapter", () => {
       ["a missing stickerId", { packageId: "446" }],
       ["a non-decimal ID", { packageId: "446", stickerId: "cat" }],
       ["a sender-text resource type", { ...sticker, resourceType: "MESSAGE" }],
-      ["an unknown resource type", { ...sticker, resourceType: "HOLOGRAM" }],
+      ["a non-string resource type", { ...sticker, resourceType: 42 }],
     ])("rejects a sticker with %s before calling LINE", async (_label, bad) => {
       await expect(
         adapter.postMessage("line:bot-123:user:u-123", {

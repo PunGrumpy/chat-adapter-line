@@ -1,9 +1,15 @@
 import { Message } from "chat";
 import type { MessageData } from "chat";
 
-import type { LineEvent, LineMention, LineSticker } from "./types.js";
+import type {
+  LineEvent,
+  LineLocation,
+  LineMention,
+  LineSticker,
+} from "./types.js";
 
 export interface LineMessageData extends MessageData<LineEvent> {
+  location?: LineLocation;
   mentions: LineMention[];
   quoteToken?: string;
   sticker?: LineSticker;
@@ -14,6 +20,12 @@ export interface LineMessageData extends MessageData<LineEvent> {
  * `Message` has no slot for.
  */
 export class LineMessage extends Message<LineEvent> {
+  /**
+   * The place this message points at, on a location message. Fill in a title
+   * and address to send it back on a `location` postable.
+   */
+  readonly location?: LineLocation;
+
   /** Native mentions on this message, in the order LINE reported them. */
   readonly mentions: LineMention[];
 
@@ -32,6 +44,7 @@ export class LineMessage extends Message<LineEvent> {
 
   constructor(data: LineMessageData) {
     super(data);
+    this.location = data.location;
     this.mentions = data.mentions;
     this.quoteToken = data.quoteToken;
     this.sticker = data.sticker;

@@ -73,6 +73,19 @@ export interface LineSticker {
   text?: string;
 }
 
+/**
+ * A place on an inbound LINE location message.
+ *
+ * LINE always sends the coordinates. The title and address are optional,
+ * because a sender can drop a pin without naming it.
+ */
+export interface LineLocation {
+  latitude: number;
+  longitude: number;
+  title?: string;
+  address?: string;
+}
+
 /** Raw LINE webhook message event */
 export interface LineMessageEvent {
   type: "message";
@@ -95,6 +108,10 @@ export interface LineMessageEvent {
     stickerId?: string;
     stickerResourceType?: LineStickerResourceType;
     keywords?: string[];
+    title?: string;
+    address?: string;
+    latitude?: number;
+    longitude?: number;
     mention?: {
       mentionees: LineMention[];
     };
@@ -225,6 +242,23 @@ export interface LinePostableSticker {
 }
 
 /**
+ * Native LINE location message.
+ *
+ * LINE drops the pin at the coordinates and shows the title and address
+ * beside it, and requires all four. Latitude runs from -90 to 90 and
+ * longitude from -180 to 180; the title and address are capped at 100
+ * characters each.
+ */
+export interface LinePostableLocation {
+  location: {
+    title: string;
+    address: string;
+    latitude: number;
+    longitude: number;
+  };
+}
+
+/**
  * Native LINE Flex Message.
  *
  * The adapter sends `contents` to LINE untouched, so this shape covers the
@@ -253,6 +287,7 @@ export type LinePostableMessage =
   | LinePostableText
   | LinePostableAudio
   | LinePostableFlex
+  | LinePostableLocation
   | LinePostableSticker
   | (PostableRaw & LineTextOptions)
   | (PostableMarkdown & Pick<LineTextOptions, "quoteToken">)

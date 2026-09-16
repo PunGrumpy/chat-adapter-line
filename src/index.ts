@@ -63,6 +63,7 @@ export type {
   LineAdapterConfig,
   LineBatchSendResult,
   LineBroadcastOptions,
+  LineContentProvider,
   LineEmoji,
   LineEmojiSegment,
   LineEvent,
@@ -72,6 +73,7 @@ export type {
   LineLifecycleHandler,
   LineLifecycleRawEvent,
   LineLocation,
+  LineMediaMetadata,
   LineMediaUrls,
   LineMention,
   LineMentionSegment,
@@ -109,7 +111,11 @@ export {
 export { buildLocationMessage, parseInboundLocation } from "./lib/locations.js";
 export { parseInboundEmojis } from "./lib/emojis.js";
 export { isLifecycleEvent, toLifecycleEvent } from "./lib/lifecycle-events.js";
-export { buildAudioMessage, buildMediaMessage } from "./lib/media.js";
+export {
+  buildAudioMessage,
+  buildMediaMessage,
+  parseInboundMedia,
+} from "./lib/media.js";
 export { buildTextMessage } from "./lib/text-v2.js";
 export { buildStickerMessage, parseInboundSticker } from "./lib/stickers.js";
 export { linePostable, toLineMessages } from "./lib/outbound.js";

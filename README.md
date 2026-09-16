@@ -78,6 +78,8 @@ bot.onSubscribedMessage(async (thread, message) => {
 
 The Chat SDK's `PostableMessage` type does not know about LINE's extra fields, so wrap LINE-native postables in `linePostable()` when calling `thread.post()`. The helper only narrows the static type. The adapter accepts these shapes at runtime either way.
 
+LINE caps a text message at 5000 characters, counted in UTF-16 code units the way `String.prototype.length` counts them. The adapter measures the text it would send, after mention and emoji placeholders and brace escaping are applied, and throws a `ValidationError` instead of calling LINE when that passes the cap. Markdown and AST postables are measured after rendering.
+
 ### Quoted replies
 
 Every inbound text, image, video, and sticker message carries a `quoteToken`. Pass it back on a text postable to quote that message natively:

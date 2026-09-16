@@ -5,6 +5,7 @@ import { MAX_MENTIONS_PER_MESSAGE } from "../../src/lib/mentions.js";
 import {
   buildTextMessage,
   MAX_SUBSTITUTIONS_PER_MESSAGE,
+  MAX_TEXT_LENGTH,
 } from "../../src/lib/text-v2.js";
 
 const PRODUCT_ID = "5ac1bfd5040ab15980c9b435";
@@ -299,5 +300,57 @@ describe("buildTextMessage", () => {
         })),
       })
     ).toThrow(/at most 100/);
+  });
+
+  it("accepts a plain text of exactly the LINE limit", () => {
+    expect(buildTextMessage("a".repeat(MAX_TEXT_LENGTH))).toMatchObject({
+      type: "text",
+    });
+  });
+
+  it("rejects a plain text one character over the LINE limit", () => {
+    expect(() => buildTextMessage("a".repeat(MAX_TEXT_LENGTH + 1))).toThrow(
+      /at most 5000 characters/
+    );
+  });
+
+  it("measures a textV2 after encoding, where a placeholder grows the text", () => {
+    // 4993 letters plus one "$" is 4994 characters, under the limit as
+    // written, but "$" becomes "{emoji0}" and the sent text is 5001.
+    const text = `${"a".repeat(MAX_TEXT_LENGTH - 7)}$`;
+
+    expect(() =>
+      buildTextMessage(text, {
+        emojis: [
+          { emojiId: "001", index: text.length - 1, productId: PRODUCT_ID },
+        ],
+      })
+    ).toThrow(/at most 5000 characters in a text message, got 5001/);
+  });
+
+  it("accepts a textV2 that lands exactly on the limit after encoding", () => {
+    // 4992 letters plus "$" becomes 4992 letters plus "{emoji0}": 5000.
+    const text = `${"a".repeat(MAX_TEXT_LENGTH - 8)}$`;
+
+    expect(
+      buildTextMessage(text, {
+        emojis: [
+          { emojiId: "001", index: text.length - 1, productId: PRODUCT_ID },
+        ],
+      })
+    ).toMatchObject({ type: "textV2" });
+  });
+
+  it("counts escaped braces toward the limit", () => {
+    // Each "{" doubles on the wire, so 2500 of them plus an emoji overflow.
+    const text = `${"{".repeat(2500)}$`;
+
+    expect(() =>
+      buildTextMessage(text, {
+        emojis: [
+          { emojiId: "001", index: text.length - 1, productId: PRODUCT_ID },
+        ],
+      })
+    ).toThrow(/at most 5000 characters/);
   });
 });

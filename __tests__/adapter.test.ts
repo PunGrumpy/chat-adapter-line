@@ -2803,6 +2803,15 @@ describe("LineAdapter", () => {
       }
     );
 
+    it("rejects a text over 5000 characters before calling LINE", async () => {
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", "a".repeat(5001))
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+    });
+
     it("propagates provider failures for audio sends", async () => {
       mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));
 

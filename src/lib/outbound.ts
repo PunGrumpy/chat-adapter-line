@@ -7,8 +7,8 @@ import { buildFlexMessage, buildNativeFlexMessage } from "./flex-messages.js";
 import type { LineFormatConverter } from "./format-converter.js";
 import { isRecord } from "./is-record.js";
 import { buildLocationMessage } from "./locations.js";
-import { buildTextMessage } from "./mentions.js";
 import { buildStickerMessage } from "./stickers.js";
+import { buildTextMessage } from "./text-v2.js";
 import { toPlainText } from "./to-plain-text.js";
 
 /** LINE accepts at most five message objects per send request. */

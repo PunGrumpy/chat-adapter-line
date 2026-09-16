@@ -14,6 +14,7 @@ export interface LineMessageData extends MessageData<LineEvent> {
   location?: LineLocation;
   mentions: LineMention[];
   quoteToken?: string;
+  quotedMessageId?: string;
   sticker?: LineSticker;
 }
 
@@ -45,6 +46,13 @@ export class LineMessage extends Message<LineEvent> {
   readonly quoteToken?: string;
 
   /**
+   * LINE's ID for the message this one quotes, on a message that quotes an
+   * earlier one. It identifies the quoted message without resolving it: the
+   * adapter never fetches the message behind the ID.
+   */
+  readonly quotedMessageId?: string;
+
+  /**
    * The sticker this message carries, on a sticker message. Pass it back on
    * a `sticker` postable to send the same sticker.
    */
@@ -56,6 +64,7 @@ export class LineMessage extends Message<LineEvent> {
     this.location = data.location;
     this.mentions = data.mentions;
     this.quoteToken = data.quoteToken;
+    this.quotedMessageId = data.quotedMessageId;
     this.sticker = data.sticker;
   }
 }

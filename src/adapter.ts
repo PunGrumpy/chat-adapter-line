@@ -499,6 +499,11 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       typeof raw.message.quoteToken === "string"
         ? raw.message.quoteToken
         : undefined;
+    const quotedMessageId =
+      typeof raw.message.quotedMessageId === "string" &&
+      raw.message.quotedMessageId !== ""
+        ? raw.message.quotedMessageId
+        : undefined;
     const sticker = parseInboundSticker(raw.message);
     const location = parseInboundLocation(raw.message);
 
@@ -532,6 +537,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         edited: false,
       },
       quoteToken,
+      quotedMessageId,
       raw,
       sticker,
       text,

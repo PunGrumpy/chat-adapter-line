@@ -99,6 +99,18 @@ bot.onSubscribedMessage(async (thread, message) => {
 
 `quoteToken` works on `text`, `raw`, `markdown`, and `ast` postables and survives both the Reply API and Push API paths. LINE cannot quote from a card or audio message, so combining those with a `quoteToken` throws a `ValidationError` rather than sending an unquoted message.
 
+When an inbound message is itself quoting an earlier one, `message.quotedMessageId` holds LINE's ID for the message being quoted:
+
+```typescript
+bot.onSubscribedMessage(async (thread, message) => {
+  if (message instanceof LineMessage && message.quotedMessageId) {
+    console.log(message.text, "quotes", message.quotedMessageId);
+  }
+});
+```
+
+The two fields point in opposite directions: `quoteToken` is what you send back to quote _this_ message, while `quotedMessageId` identifies the older message _this one_ quotes. LINE omits `quotedMessageId` unless the sender actually quoted something. The adapter reports the ID and stops there, because LINE's API offers no way to fetch a message by ID, so resolving the quoted message means looking it up in whatever you stored yourself.
+
 ### Sending mentions
 
 Mentions need stable character offsets, so the adapter accepts them on `text` and `raw` postables only. LINE renders them in group chats and multi-person chats, through the Reply API or Push API, with at most 20 mentions per message. Each segment selects the span of your text that LINE replaces with the mention:

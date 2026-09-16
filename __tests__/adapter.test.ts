@@ -1241,6 +1241,84 @@ describe("LineAdapter", () => {
       expect(adapter.parseMessage(makeEvent()).emojis).toEqual([]);
     });
 
+    /** The message kinds LINE issues a quote token for. */
+    const quotable = [
+      ["text", { id: "msg-1", text: "hello", type: "text" }],
+      ["image", { id: "img-1", type: "image" }],
+      ["video", { id: "vid-1", type: "video" }],
+      [
+        "sticker",
+        { id: "stk-1", packageId: "446", stickerId: "1988", type: "sticker" },
+      ],
+    ] as const;
+
+    it.each(quotable)(
+      "exposes the quoted message ID on a %s message",
+      (_label, message) => {
+        const event = makeEvent({
+          message: {
+            ...message,
+            quoteToken: "qt-1",
+            quotedMessageId: "468789532432007169",
+          },
+        } as never);
+        const parsed = adapter.parseMessage(event);
+
+        expect(parsed.quotedMessageId).toBe("468789532432007169");
+        expect(parsed.quoteToken).toBe("qt-1");
+      }
+    );
+
+    it.each(quotable)(
+      "leaves it unset on an unquoted %s message",
+      (_label, message) => {
+        const event = makeEvent({
+          message: { ...message, quoteToken: "qt-1" },
+        } as never);
+        const parsed = adapter.parseMessage(event);
+
+        expect(parsed.quotedMessageId).toBeUndefined();
+        expect(parsed.quoteToken).toBe("qt-1");
+      }
+    );
+
+    it.each([
+      ["an empty string", ""],
+      ["a number", 468_789_532_432_007_200],
+      ["null", null],
+      ["an object", { id: "468789532432007169" }],
+    ])("omits a quoted message ID that is %s", (_label, quotedMessageId) => {
+      const event = makeEvent({
+        message: {
+          id: "msg-1",
+          quoteToken: "qt-1",
+          quotedMessageId,
+          text: "hello",
+          type: "text",
+        },
+      } as never);
+      const parsed = adapter.parseMessage(event);
+
+      expect(parsed.quotedMessageId).toBeUndefined();
+      expect(parsed.text).toBe("hello");
+      expect(parsed.id).toBe("evt-1");
+    });
+
+    it("keeps a quoted message ID on a message with no quote token", () => {
+      const event = makeEvent({
+        message: {
+          id: "msg-1",
+          quotedMessageId: "468789532432007169",
+          text: "hello",
+          type: "text",
+        },
+      } as never);
+      const parsed = adapter.parseMessage(event);
+
+      expect(parsed.quotedMessageId).toBe("468789532432007169");
+      expect(parsed.quoteToken).toBeUndefined();
+    });
+
     it("handles group source type", () => {
       const event = makeEvent({
         source: { groupId: "g-123", type: "group" },

@@ -401,7 +401,7 @@ describe("LineAdapter", () => {
       );
     });
 
-    it("falls back to unknown channelId on failure", async () => {
+    it("leaves the channel ID unset when bot info fails", async () => {
       mocks.getBotInfo.mockRejectedValue(new Error("API error"));
       const mockChat = {
         getLogger: vi.fn(() => ({
@@ -414,12 +414,16 @@ describe("LineAdapter", () => {
 
       await adapter.initialize(mockChat as never);
 
-      expect(adapter.channelIdFromThreadId("line:unknown:user:u-1")).toBe(
-        "unknown"
-      );
+      expect(() =>
+        adapter.encodeThreadId({
+          channelId: "",
+          sourceId: "u-1",
+          sourceType: "user",
+        })
+      ).toThrow(ValidationError);
     });
 
-    it("rethrows a 429 instead of pinning channelId to unknown", async () => {
+    it("does not throw when bot info is rate limited", async () => {
       mocks.getBotInfo.mockRejectedValue(makeRateLimitError(10));
       const mockChat = {
         getLogger: vi.fn(() => ({
@@ -432,7 +436,47 @@ describe("LineAdapter", () => {
 
       await expect(
         adapter.initialize(mockChat as never)
-      ).rejects.toBeInstanceOf(AdapterRateLimitError);
+      ).resolves.toBeUndefined();
+    });
+
+    it("takes the channel ID from the first webhook when bot info fails", async () => {
+      mocks.getBotInfo.mockRejectedValue(new Error("API error"));
+      const mockChat = {
+        getLogger: vi.fn(() => ({
+          debug: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+        })),
+        processAction: vi.fn(),
+        processMessage: vi.fn(),
+      };
+      await adapter.initialize(mockChat as never);
+
+      const body = JSON.stringify({
+        destination: "Ubot-dest",
+        events: [makeEvent()],
+      });
+      await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret))
+      );
+
+      const [, threadId, factory] = mockChat.processMessage.mock.calls[0] as [
+        unknown,
+        string,
+        () => Promise<{ threadId: string }>,
+      ];
+      expect(threadId).toBe("line:Ubot-dest:user:u-123");
+      await expect(factory()).resolves.toMatchObject({
+        threadId: "line:Ubot-dest:user:u-123",
+      });
+      expect(
+        adapter.encodeThreadId({
+          channelId: "",
+          sourceId: "u-9",
+          sourceType: "user",
+        })
+      ).toBe("line:Ubot-dest:user:u-9");
     });
   });
 
@@ -725,6 +769,7 @@ describe("LineAdapter", () => {
     });
 
     it("uses destination as channelId when bot info not fetched", async () => {
+      mocks.getBotInfo.mockRejectedValueOnce(new Error("API error"));
       const adapter2 = new LineAdapter(validConfig);
       const mockChat2 = {
         getLogger: vi.fn(() => ({
@@ -737,8 +782,6 @@ describe("LineAdapter", () => {
       };
 
       await adapter2.initialize(mockChat2 as never);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter2 as any).channelId = null;
 
       const payload = {
         destination: "ch-dest",

@@ -32,6 +32,7 @@ import { ConsoleLogger } from "chat";
 import { parseInboundEmojis } from "./lib/emojis.js";
 import { deserializePostbackData } from "./lib/flex-messages.js";
 import { LineFormatConverter } from "./lib/format-converter.js";
+import { isNonEmptyString } from "./lib/guards.js";
 import { isLifecycleEvent, toLifecycleEvent } from "./lib/lifecycle-events.js";
 import { parseInboundLocation } from "./lib/locations.js";
 import { parseInboundMedia } from "./lib/media.js";
@@ -268,11 +269,15 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       this.channelId = botInfo.userId;
       this.logger.info("LINE adapter initialized", { botId: botInfo.userId });
     } catch (error) {
-      if (error instanceof AdapterRateLimitError) {
-        throw error;
-      }
-      this.logger.error("Failed to fetch bot info", { error });
-      this.channelId = "unknown";
+      // Never throw here: the Chat SDK keeps a failed initialization and
+      // replays it to every later webhook, for every adapter, until the
+      // process restarts. Never guess either, because the channel ID is part
+      // of every thread ID. Each webhook names the bot in `destination`, so
+      // the first one supplies it.
+      this.logger.warn(
+        "Failed to fetch bot info; the channel ID will come from the first webhook",
+        { error }
+      );
     }
   }
 
@@ -324,6 +329,13 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     if (!payload.events) {
       return new Response("OK", { status: 200 });
+    }
+
+    // `destination` is the bot's own user ID, the value getBotInfo returns.
+    // When initialization could not fetch it, the first verified webhook
+    // supplies it, so thread IDs never depend on that call succeeding.
+    if (this.channelId === null && isNonEmptyString(payload.destination)) {
+      this.channelId = payload.destination;
     }
 
     const channelId = this.channelId ?? payload.destination;

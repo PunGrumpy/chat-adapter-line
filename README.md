@@ -381,6 +381,15 @@ Every event carries `type`, `threadId`, `sourceType`, `sourceId`, `timestamp`, `
 
 `onLifecycleEvent()` returns a function that unsubscribes that handler. Every registered handler sees every event. A handler that throws or rejects is logged and does not stop the others or change the webhook response, which stays `200`.
 
+The webhook answers before your handlers finish. On a serverless host, pass `waitUntil` in the webhook options, as you would for message handlers. The adapter hands it each handler's work, so the runtime keeps running until the handler settles:
+
+```typescript
+import { after } from "next/server";
+
+export const POST = (request: Request) =>
+  bot.webhooks.line(request, { waitUntil: (task) => after(() => task) });
+```
+
 LINE issues a reply token with `follow`, `join`, and `memberJoined`, and the adapter stores it, so a welcome message sent from the handler goes out over the free Reply API instead of the quota-metered Push API.
 
 Two behaviors differ from message delivery on purpose. A redelivered lifecycle event is still delivered, with `isRedelivery` set, because a missed `unfollow` cannot be recovered the way a missed message can be resent. A standby-mode event is delivered too, with `mode` set to `standby`. Filter on those fields, and deduplicate on `webhookEventId`, which LINE guarantees is unique per delivery.

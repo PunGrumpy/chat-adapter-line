@@ -74,6 +74,10 @@ bot.onSubscribedMessage(async (thread, message) => {
 });
 ```
 
+### Typing indicator
+
+`thread.startTyping()` shows LINE's loading animation in a 1:1 chat for up to 20 seconds, or until the bot's next message arrives. LINE has no typing indicator in groups or rooms, so the call does nothing there. A failed request is logged at debug level and never throws.
+
 ### Posting LINE-native messages
 
 The Chat SDK's `PostableMessage` type does not know about LINE's extra fields, so wrap LINE-native postables in `linePostable()` when calling `thread.post()`. The helper only narrows the static type. The adapter accepts these shapes at runtime either way.

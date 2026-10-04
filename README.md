@@ -84,6 +84,8 @@ The Chat SDK's `PostableMessage` type does not know about LINE's extra fields, s
 
 LINE caps a text message at 5000 characters, counted in UTF-16 code units the way `String.prototype.length` counts them. The adapter measures the text it would send, after mention and emoji placeholders and brace escaping are applied, and throws a `ValidationError` instead of calling LINE when that passes the cap. Markdown and AST postables are measured after rendering.
 
+LINE displays no Markdown, so the adapter renders Markdown and AST postables as plain text. It drops emphasis and heading marks. Code keeps its exact text without fences, a link keeps its URL as `text (url)`, and list items keep their `-` or `1.` markers. The adapter never reads inbound text as Markdown either, so `message.formatted` holds exactly what the user typed.
+
 ### Quoted replies
 
 Every inbound text, image, video, and sticker message carries a `quoteToken`. Pass it back on a text postable to quote that message natively:

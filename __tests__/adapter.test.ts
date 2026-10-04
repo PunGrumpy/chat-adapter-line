@@ -8,7 +8,7 @@ import {
   PermissionError,
   ValidationError,
 } from "@chat-adapter/shared";
-import { deriveChannelId } from "chat";
+import { deriveChannelId, parseMarkdown } from "chat";
 import {
   afterEach,
   beforeEach,
@@ -121,18 +121,10 @@ vi.mock("chat", async (importOriginal) => {
     }
   };
 
-  const parseMarkdown = vi.fn();
-  const stringifyMarkdown = vi.fn();
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (globalThis as any).__chatMocks = { parseMarkdown, stringifyMarkdown };
-
   return {
     ...actual,
     ConsoleLogger: MockConsoleLogger,
     Message: MockMessage,
-    parseMarkdown,
-    stringifyMarkdown,
   };
 });
 
@@ -146,26 +138,13 @@ interface Mocks {
   getGroupSummary: Mock;
   showLoadingAnimation: Mock;
   getMessageContent: Mock;
-  parseMarkdown: Mock;
-  stringifyMarkdown: Mock;
 }
 
 const getMocks = (): Mocks => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const g = globalThis as any;
-  return { ...g.__lineMocks, ...g.__chatMocks };
+  return { ...g.__lineMocks };
 };
-
-// Set default implementations for the chat mocks (used by LineFormatConverter tests)
-const chatMocks = getMocks();
-chatMocks.parseMarkdown.mockImplementation((text: string) => ({
-  children: [],
-  text,
-  type: "root",
-}));
-chatMocks.stringifyMarkdown.mockImplementation(
-  (ast: { text?: string }) => ast?.text ?? ""
-);
 
 const validConfig = {
   channelAccessToken: "test-token",
@@ -309,26 +288,35 @@ const seedReplyToken = async (
 };
 
 describe("LineFormatConverter", () => {
-  it("converts text to AST", () => {
+  it("reads LINE text literally instead of as Markdown", () => {
     const converter = new LineFormatConverter();
-    const ast = converter.toAst("hello");
-    expect(ast).toBeDefined();
-  });
 
-  it("converts AST to text", () => {
-    const converter = new LineFormatConverter();
-    const text = converter.fromAst({
-      children: [],
-      text: "hello",
+    expect(converter.toAst("__init__.py and *b*")).toEqual({
+      children: [
+        {
+          children: [{ type: "text", value: "__init__.py and *b*" }],
+          type: "paragraph",
+        },
+      ],
       type: "root",
-    } as never);
-    expect(text).toBe("hello");
+    });
   });
 
-  it("renderPostable returns plain text", () => {
+  it("renders an AST as plain text", () => {
     const converter = new LineFormatConverter();
-    const result = converter.renderPostable("hello **world**");
-    expect(result).toBe("hello world");
+
+    expect(converter.fromAst(parseMarkdown("hello **world**"))).toBe(
+      "hello world"
+    );
+  });
+
+  it("renders a markdown postable and passes a string through", () => {
+    const converter = new LineFormatConverter();
+
+    expect(converter.renderPostable({ markdown: "hello **world**" })).toBe(
+      "hello world"
+    );
+    expect(converter.renderPostable("hello **world**")).toBe("hello **world**");
   });
 });
 
@@ -340,14 +328,6 @@ describe("LineAdapter", () => {
     mocks = getMocks();
     vi.clearAllMocks();
     mocks.getBotInfo.mockResolvedValue({ userId: "bot-123" });
-    mocks.parseMarkdown.mockImplementation((text: string) => ({
-      children: [],
-      text,
-      type: "root",
-    }));
-    mocks.stringifyMarkdown.mockImplementation(
-      (ast: { text?: string }) => ast?.text ?? ""
-    );
     adapter = new LineAdapter(validConfig);
   });
 
@@ -1619,8 +1599,6 @@ describe("LineAdapter", () => {
     });
 
     it("sends a markdown message as plain text", async () => {
-      mocks.stringifyMarkdown.mockReturnValueOnce("# Hello **world**");
-
       const message = {
         markdown: "# Hello **world**",
       } as never;
@@ -1634,7 +1612,7 @@ describe("LineAdapter", () => {
 
     it("sends an AST message as plain text", async () => {
       await adapter.postMessage("line:bot-123:user:u-123", {
-        ast: { children: [], text: "hello", type: "root" },
+        ast: parseMarkdown("**hello**"),
       } as never);
 
       expect(mocks.pushMessage).toHaveBeenCalledWith({
@@ -2290,14 +2268,12 @@ describe("LineAdapter", () => {
   });
 
   describe("renderFormatted", () => {
-    it("converts AST to markdown string", () => {
-      const result = adapter.renderFormatted({
-        children: [],
-        text: "hello",
-        type: "root",
-      } as never);
+    it("renders an AST as LINE plain text", () => {
+      const result = adapter.renderFormatted(
+        parseMarkdown("See [docs](https://example.com)")
+      );
 
-      expect(result).toBe("hello");
+      expect(result).toBe("See docs (https://example.com)");
     });
   });
 
@@ -2334,8 +2310,6 @@ describe("LineAdapter", () => {
     });
 
     it("broadcasts several postables in one request", async () => {
-      mocks.stringifyMarkdown.mockReturnValueOnce("# Title");
-
       const result = await adapter.broadcastMessages(
         [
           { markdown: "# Title" },
@@ -3029,8 +3003,6 @@ describe("LineAdapter", () => {
     });
 
     it("carries a quote token on markdown and raw sends", async () => {
-      mocks.stringifyMarkdown.mockReturnValueOnce("**bold**");
-
       await adapter.postMessage("line:bot-123:user:u-123", {
         markdown: "**bold**",
         quoteToken: "qt-md",

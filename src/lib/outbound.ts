@@ -10,7 +10,6 @@ import { buildLocationMessage } from "./locations.js";
 import { buildAudioMessage, buildMediaMessage } from "./media.js";
 import { buildStickerMessage } from "./stickers.js";
 import { buildTextMessage } from "./text-v2.js";
-import { toPlainText } from "./to-plain-text.js";
 
 /** LINE accepts at most five message objects per send request. */
 export const MAX_MESSAGES_PER_REQUEST = 5;
@@ -173,7 +172,7 @@ export const toLineMessages = (
   if (message.ast) {
     rejectSubstitutions(options, "ast");
     const rendered = converter.fromAst(message.ast as Root);
-    return [buildTextMessage(toPlainText(rendered), options)];
+    return [buildTextMessage(rendered, options)];
   }
 
   throw new ValidationError("line", "No message content to send");

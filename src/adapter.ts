@@ -87,12 +87,18 @@ const verifySignature = (
     return false;
   }
 
-  const hash = crypto
-    .createHmac("SHA256", channelSecret)
-    .update(body)
-    .digest("base64");
+  const expected = Buffer.from(
+    crypto.createHmac("SHA256", channelSecret).update(body).digest("base64")
+  );
+  const received = Buffer.from(signature);
 
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(hash));
+  // timingSafeEqual throws on inputs of different byte lengths, and a header
+  // of the wrong length is a wrong signature.
+  if (received.length !== expected.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(received, expected);
 };
 
 const readableToBuffer = async (

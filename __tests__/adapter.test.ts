@@ -370,6 +370,15 @@ describe("LineAdapter", () => {
       });
       expect(customAdapter.userName).toBe("my-bot");
     });
+
+    it.each([
+      ["an empty channel secret", { ...validConfig, channelSecret: "" }],
+      ["a blank channel secret", { ...validConfig, channelSecret: "   " }],
+      ["an empty access token", { ...validConfig, channelAccessToken: "" }],
+      ["a blank access token", { ...validConfig, channelAccessToken: " \n" }],
+    ])("refuses %s at construction", (_label, config) => {
+      expect(() => new LineAdapter(config)).toThrow(ValidationError);
+    });
   });
 
   describe("initialize", () => {
@@ -541,6 +550,28 @@ describe("LineAdapter", () => {
       const request = makeRequest(body, wrongSig);
 
       const response = await adapter.handleWebhook(request);
+
+      expect(response.status).toBe(401);
+    });
+
+    it.each([
+      ["a short signature", "abc"],
+      ["a long signature", "a".repeat(100)],
+      ["a signature of multibyte characters", "ü".repeat(44)],
+    ])("returns 401 for %s instead of throwing", async (_label, signature) => {
+      const body = JSON.stringify({ destination: "ch-123", events: [] });
+
+      const response = await adapter.handleWebhook(
+        makeRequest(body, signature)
+      );
+
+      expect(response.status).toBe(401);
+    });
+
+    it("returns 401 when the signature header is missing", async () => {
+      const body = JSON.stringify({ destination: "ch-123", events: [] });
+
+      const response = await adapter.handleWebhook(makeRequest(body, null));
 
       expect(response.status).toBe(401);
     });

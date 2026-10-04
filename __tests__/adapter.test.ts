@@ -230,6 +230,14 @@ const createSingleChunk = async function* createSingleChunkGen(
   yield text;
 };
 
+const createChunks = async function* createChunksGen(
+  ...texts: string[]
+): AsyncGenerator<string> {
+  for (const text of texts) {
+    yield text;
+  }
+};
+
 const createNonTextChunk = async function* createNonTextChunkGen<T>(
   chunk: T
 ): AsyncGenerator<T> {
@@ -1857,22 +1865,42 @@ describe("LineAdapter", () => {
       expect(mocks.pushMessage).not.toHaveBeenCalled();
     });
 
-    it("streams the first message via reply API and the rest via push", async () => {
+    it("sends a streamed reply through the reply token in one request", async () => {
       await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
 
-      await adapter.stream(
+      const result = await adapter.stream(
         "line:bot-123:user:u-123",
         createRepeatedChunks("a".repeat(501), 2)
       );
 
       expect(mocks.replyMessage).toHaveBeenCalledExactlyOnceWith({
-        messages: [{ text: "a".repeat(501), type: "text" }],
+        messages: [{ text: "a".repeat(1002), type: "text" }],
+        replyToken: "fresh-reply-token",
+      });
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(result.id).toBe("replied-1");
+    });
+
+    it("sends a streamed reply over five messages in several requests", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+      const result = await adapter.stream(
+        "line:bot-123:user:u-123",
+        createRepeatedChunks("a".repeat(5000), 6)
+      );
+
+      expect(mocks.replyMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: Array.from({ length: 5 }, () => ({
+          text: "a".repeat(5000),
+          type: "text",
+        })),
         replyToken: "fresh-reply-token",
       });
       expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
-        messages: [{ text: "a".repeat(501), type: "text" }],
+        messages: [{ text: "a".repeat(5000), type: "text" }],
         to: "u-123",
       });
+      expect(result.id).toBe("replied-1");
     });
 
     it("seeds the reply token from postback events too", async () => {
@@ -1993,27 +2021,31 @@ describe("LineAdapter", () => {
       expect(result.id).toBe("sent-1");
     });
 
-    it("sends chunks when buffer exceeds 500 chars", async () => {
-      const longText = "a".repeat(501);
-
+    it("sends a long reply as one message", async () => {
       await adapter.stream(
         "line:bot-123:user:u-123",
-        createSingleChunk(longText)
+        createRepeatedChunks("a".repeat(501), 2)
       );
 
-      expect(mocks.pushMessage).toHaveBeenCalledWith({
-        messages: [{ text: longText, type: "text" }],
+      expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [{ text: "a".repeat(1002), type: "text" }],
         to: "u-123",
       });
     });
 
-    it("limits to 5 stream messages", async () => {
+    it("splits a reply over 5000 characters instead of dropping text", async () => {
       await adapter.stream(
         "line:bot-123:user:u-123",
         createRepeatedChunks("a".repeat(501), 10)
       );
 
-      expect(mocks.pushMessage).toHaveBeenCalledTimes(5);
+      expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [
+          { text: "a".repeat(5000), type: "text" },
+          { text: "a".repeat(10), type: "text" },
+        ],
+        to: "u-123",
+      });
     });
 
     it("returns empty raw message when stream has no content", async () => {
@@ -2046,6 +2078,63 @@ describe("LineAdapter", () => {
       const result = await adapter.stream(
         "line:bot-123:user:u-123",
         createNonTextChunk(nonTextChunk) as AsyncIterable<string>
+      );
+
+      expect(result.id).toBe("");
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("renders streamed Markdown like a markdown postable", async () => {
+      await adapter.stream(
+        "line:bot-123:user:u-123",
+        createChunks(
+          "## Summary\n\n",
+          "This is **important**.\n\n",
+          "- one\n- two"
+        )
+      );
+
+      expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [
+          {
+            text: "Summary\n\nThis is important.\n\n- one\n- two",
+            type: "text",
+          },
+        ],
+        to: "u-123",
+      });
+    });
+
+    it("splits a long reply at a paragraph break", async () => {
+      await adapter.stream(
+        "line:bot-123:user:u-123",
+        createSingleChunk(`${"a".repeat(3000)}\n\n${"b".repeat(3000)}`)
+      );
+
+      expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [
+          { text: "a".repeat(3000), type: "text" },
+          { text: "b".repeat(3000), type: "text" },
+        ],
+        to: "u-123",
+      });
+    });
+
+    it("sends more than five messages over several requests", async () => {
+      await adapter.stream(
+        "line:bot-123:user:u-123",
+        createRepeatedChunks("a".repeat(5000), 6)
+      );
+
+      expect(mocks.pushMessage).toHaveBeenCalledTimes(2);
+      expect(mocks.pushMessage.mock.calls[0][0].messages).toHaveLength(5);
+      expect(mocks.pushMessage.mock.calls[1][0].messages).toHaveLength(1);
+    });
+
+    it("skips a stream that renders to nothing", async () => {
+      const result = await adapter.stream(
+        "line:bot-123:user:u-123",
+        createSingleChunk("---")
       );
 
       expect(result.id).toBe("");

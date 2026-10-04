@@ -39,6 +39,7 @@ import { parseInboundMedia } from "./lib/media.js";
 import { parseInboundMentions } from "./lib/mentions.js";
 import {
   hasMentionSubstitution,
+  MAX_MESSAGES_PER_REQUEST,
   toBatchLineMessages,
   toLineMessages,
   validateAggregationUnits,
@@ -46,7 +47,9 @@ import {
   validateRetryKey,
 } from "./lib/outbound.js";
 import { ReplyTokenStore } from "./lib/reply-token-store.js";
+import { splitText } from "./lib/split-text.js";
 import { parseInboundSticker } from "./lib/stickers.js";
+import { buildTextMessage, MAX_TEXT_LENGTH } from "./lib/text-v2.js";
 import {
   decodeThreadId,
   encodeThreadId,
@@ -786,48 +789,57 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     }
   }
 
+  /**
+   * Sends a streamed reply once the stream ends.
+   *
+   * LINE cannot edit a sent message, so a reply cannot grow in place the way
+   * it does on platforms with native streaming. The adapter collects the
+   * whole stream, renders it the way it renders a `markdown` postable, splits
+   * it into text messages within LINE's 5000-character limit, and sends them
+   * five to a request. The first request uses the thread's reply token when
+   * one is fresh, so a typical reply costs no message quota.
+   */
   async stream(
     threadId: string,
     textStream: AsyncIterable<string | StreamChunk>,
     _options?: StreamOptions
   ): Promise<RawMessage<LineEvent>> {
     const { sourceId } = this.decodeThreadId(threadId);
-    let lastResult: RawMessage<LineEvent> | undefined;
-    let buffer = "";
-    let sentCount = 0;
 
+    let markdown = "";
     for await (const chunk of textStream) {
-      const text = extractStreamText(chunk);
-
-      if (!text) {
-        continue;
-      }
-
-      buffer += text;
-
-      if (buffer.length > 500 && sentCount < 5) {
-        const result = await this.sendMessages(threadId, sourceId, [
-          { text: buffer, type: "text" },
-        ]);
-        lastResult = this.buildRawMessage(result, buffer, threadId);
-        sentCount += 1;
-        buffer = "";
-      }
+      markdown += extractStreamText(chunk);
     }
 
-    if (buffer && sentCount < 5) {
-      const result = await this.sendMessages(threadId, sourceId, [
-        { text: buffer, type: "text" },
-      ]);
-      lastResult = this.buildRawMessage(result, buffer, threadId);
-    }
+    // The Chat SDK records a streamed reply as Markdown, so render it
+    // exactly like a `markdown` postable.
+    const text = this.converter.fromMarkdown(markdown);
+    const messages = splitText(text, MAX_TEXT_LENGTH).map((part) =>
+      buildTextMessage(part)
+    );
 
-    if (!lastResult) {
+    if (messages.length === 0) {
       this.logger.debug("Stream produced no content, skipping send");
       return this.buildEmptyRawMessage(threadId);
     }
 
-    return lastResult;
+    let first: SendResult | undefined;
+    for (
+      let start = 0;
+      start < messages.length;
+      start += MAX_MESSAGES_PER_REQUEST
+    ) {
+      const result = await this.sendMessages(
+        threadId,
+        sourceId,
+        messages.slice(start, start + MAX_MESSAGES_PER_REQUEST)
+      );
+      first ??= result;
+    }
+
+    // Report the first message: it opens the reply, and its quote token is
+    // the one a later message would quote.
+    return this.buildRawMessage(first ?? {}, text, threadId);
   }
 
   private buildRawMessage(

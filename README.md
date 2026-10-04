@@ -55,6 +55,10 @@ LINE does not bill Reply API calls, but each Push API call counts against the ch
 
 When your bot answers an inbound message, the adapter sends that first reply through the Reply API. Later sends use the Push API, because a reply token works once and expires within a minute. You don't need to change any adapter code.
 
+### Streaming replies
+
+LINE cannot edit a sent message, so `thread.post()` with a text stream, such as an AI SDK `textStream`, cannot grow a message in place. The adapter collects the whole stream and renders it like a Markdown postable. It then sends as many text messages as LINE's 5000-character limit needs, five to a request. The first request goes through the free Reply API when a reply token is fresh. The adapter drops nothing, however long the reply. Call `thread.startTyping()` before you start generating, so a 1:1 chat shows LINE's loading animation while it waits.
+
 ### Direct messages and mentions
 
 A LINE thread whose source is a single user is a direct message, so `bot.onDirectMessage()` fires for 1:1 chats. In groups and rooms, LINE delivers native mentions as structured data. The adapter parses them onto the message and sets `message.isMention` when someone mentions the bot, so `onNewMention()` and `onMention()` work without any `@name` text matching.

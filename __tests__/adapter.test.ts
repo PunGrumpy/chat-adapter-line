@@ -29,7 +29,7 @@ vi.mock("@line/bot-sdk", () => {
   const getBotInfo = vi.fn();
   const getProfile = vi.fn();
   const getGroupSummary = vi.fn();
-  const acquireChatControl = vi.fn();
+  const showLoadingAnimation = vi.fn();
   const getMessageContent = vi.fn();
   const broadcastWithHttpInfo = vi.fn();
   const multicastWithHttpInfo = vi.fn();
@@ -54,7 +54,6 @@ vi.mock("@line/bot-sdk", () => {
   }
 
   class MockLineBotClient {
-    acquireChatControl = acquireChatControl;
     broadcastWithHttpInfo = broadcastWithHttpInfo;
     getBotInfo = getBotInfo;
     getGroupSummary = getGroupSummary;
@@ -63,6 +62,7 @@ vi.mock("@line/bot-sdk", () => {
     multicastWithHttpInfo = multicastWithHttpInfo;
     pushMessage = pushMessage;
     replyMessage = replyMessage;
+    showLoadingAnimation = showLoadingAnimation;
 
     static fromChannelAccessToken = vi.fn(() => new MockLineBotClient());
   }
@@ -70,7 +70,6 @@ vi.mock("@line/bot-sdk", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).__lineMocks = {
     HTTPFetchError,
-    acquireChatControl,
     broadcastWithHttpInfo,
     getBotInfo,
     getGroupSummary,
@@ -79,6 +78,7 @@ vi.mock("@line/bot-sdk", () => {
     multicastWithHttpInfo,
     pushMessage,
     replyMessage,
+    showLoadingAnimation,
   };
 
   return { HTTPFetchError, LineBotClient: MockLineBotClient };
@@ -143,7 +143,7 @@ interface Mocks {
   getBotInfo: Mock;
   getProfile: Mock;
   getGroupSummary: Mock;
-  acquireChatControl: Mock;
+  showLoadingAnimation: Mock;
   getMessageContent: Mock;
   parseMarkdown: Mock;
   stringifyMarkdown: Mock;
@@ -2104,6 +2104,8 @@ describe("LineAdapter", () => {
   });
 
   describe("startTyping", () => {
+    const DM_THREAD = "line:bot-123:user:u-123";
+
     beforeEach(async () => {
       await adapter.initialize({
         getLogger: vi.fn(() => ({
@@ -2113,37 +2115,66 @@ describe("LineAdapter", () => {
           warn: vi.fn(),
         })),
       } as never);
+      mocks.showLoadingAnimation.mockResolvedValue({});
     });
 
-    it("acquires chat control for user threads", async () => {
-      mocks.acquireChatControl.mockResolvedValue(null as never);
+    it("shows the loading animation in a 1:1 chat", async () => {
+      await adapter.startTyping(DM_THREAD);
 
-      await adapter.startTyping("line:bot-123:user:u-123");
-
-      expect(mocks.acquireChatControl).toHaveBeenCalledWith("u-123");
+      expect(mocks.showLoadingAnimation).toHaveBeenCalledExactlyOnceWith({
+        chatId: "u-123",
+        loadingSeconds: 20,
+      });
     });
 
-    it("skips non-user threads", async () => {
-      await adapter.startTyping("line:bot-123:group:g-123");
+    it.each([
+      ["group", "line:bot-123:group:g-123"],
+      ["room", "line:bot-123:room:r-123"],
+    ])("skips the loading animation in a %s", async (_label, threadId) => {
+      await adapter.startTyping(threadId);
 
-      expect(mocks.acquireChatControl).not.toHaveBeenCalled();
+      expect(mocks.showLoadingAnimation).not.toHaveBeenCalled();
     });
 
-    it("respects 50s cooldown", async () => {
-      mocks.acquireChatControl.mockResolvedValue(null as never);
+    it("does not re-request the loading animation while it shows", async () => {
+      await adapter.startTyping(DM_THREAD);
+      await adapter.startTyping(DM_THREAD);
 
-      await adapter.startTyping("line:bot-123:user:u-123");
-      await adapter.startTyping("line:bot-123:user:u-123");
-
-      expect(mocks.acquireChatControl).toHaveBeenCalledOnce();
+      expect(mocks.showLoadingAnimation).toHaveBeenCalledOnce();
     });
 
-    it("handles acquire failure gracefully", async () => {
-      mocks.acquireChatControl.mockRejectedValue(new Error("Rate limited"));
+    it("re-requests the loading animation after the cooldown", async () => {
+      vi.useFakeTimers();
+      try {
+        await adapter.startTyping(DM_THREAD);
+        vi.advanceTimersByTime(15_001);
+        await adapter.startTyping(DM_THREAD);
+      } finally {
+        vi.useRealTimers();
+      }
 
-      await expect(
-        adapter.startTyping("line:bot-123:user:u-123")
-      ).resolves.toBeUndefined();
+      expect(mocks.showLoadingAnimation).toHaveBeenCalledTimes(2);
+    });
+
+    it("shows the loading animation again after the bot sends", async () => {
+      mocks.pushMessage.mockResolvedValue({ sentMessages: [{ id: "p-1" }] });
+
+      await adapter.startTyping(DM_THREAD);
+      await adapter.postMessage(DM_THREAD, "Done");
+      await adapter.startTyping(DM_THREAD);
+
+      expect(mocks.showLoadingAnimation).toHaveBeenCalledTimes(2);
+    });
+
+    it("swallows a failed loading animation request", async () => {
+      mocks.showLoadingAnimation.mockRejectedValueOnce(
+        new Error("Rate limited")
+      );
+
+      await expect(adapter.startTyping(DM_THREAD)).resolves.toBeUndefined();
+      await adapter.startTyping(DM_THREAD);
+
+      expect(mocks.showLoadingAnimation).toHaveBeenCalledTimes(2);
     });
   });
 

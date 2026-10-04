@@ -183,6 +183,16 @@ const toRateLimitError = (
 /** LINE's webhook URL verification probes use a dummy token. */
 const DUMMY_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
 
+/**
+ * How long LINE shows the loading animation, in seconds. LINE accepts
+ * multiples of 5 up to 60 and hides the animation as soon as the bot's next
+ * message arrives.
+ */
+const LOADING_ANIMATION_SECONDS = 20;
+
+/** Skips repeat requests while the last animation is still showing. */
+const LOADING_ANIMATION_COOLDOWN_MS = 15_000;
+
 const extractStreamText = (chunk: string | StreamChunk): string => {
   if (typeof chunk === "string") {
     return chunk;
@@ -701,6 +711,10 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     sourceId: string,
     messages: messagingApi.Message[]
   ): Promise<SendResult> {
+    // LINE hides the loading animation once a message arrives, so the next
+    // startTyping() has to ask for it again.
+    this.lastTypingTime.delete(threadId);
+
     const replyToken = this.replyTokens.take(threadId);
 
     if (!replyToken) {
@@ -974,23 +988,33 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     }
   }
 
+  /**
+   * Shows LINE's loading animation, its typing indicator. LINE only displays
+   * it in one-on-one chats, so group and room threads are skipped.
+   */
   async startTyping(threadId: string): Promise<void> {
     if (!this.isDM(threadId)) {
       return;
     }
 
     const last = this.lastTypingTime.get(threadId);
-    if (last && Date.now() - last < 50_000) {
+    if (last && Date.now() - last < LOADING_ANIMATION_COOLDOWN_MS) {
       return;
     }
 
     const { sourceId } = this.decodeThreadId(threadId);
 
     try {
-      await this.client.acquireChatControl(sourceId);
+      await this.client.showLoadingAnimation({
+        chatId: sourceId,
+        loadingSeconds: LOADING_ANIMATION_SECONDS,
+      });
       this.lastTypingTime.set(threadId, Date.now());
     } catch (error) {
-      this.logger.debug("Failed to acquire chat control", { error });
+      this.logger.debug("Failed to show the loading animation", {
+        error,
+        threadId,
+      });
     }
   }
 

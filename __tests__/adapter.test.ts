@@ -370,6 +370,15 @@ describe("LineAdapter", () => {
       });
       expect(customAdapter.userName).toBe("my-bot");
     });
+
+    it.each([
+      ["an empty channel secret", { ...validConfig, channelSecret: "" }],
+      ["a blank channel secret", { ...validConfig, channelSecret: "   " }],
+      ["an empty access token", { ...validConfig, channelAccessToken: "" }],
+      ["a blank access token", { ...validConfig, channelAccessToken: " \n" }],
+    ])("refuses %s at construction", (_label, config) => {
+      expect(() => new LineAdapter(config)).toThrow(ValidationError);
+    });
   });
 
   describe("initialize", () => {

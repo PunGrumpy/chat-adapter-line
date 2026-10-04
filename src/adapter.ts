@@ -198,6 +198,25 @@ const readRequestId = (response: {
 }): string | undefined =>
   response.httpResponse.headers.get("x-line-request-id") ?? undefined;
 
+/**
+ * Reads one credential, refusing a blank one. An empty channel secret is a
+ * valid HMAC key that anyone can sign webhooks with, so it must never reach
+ * the signature check.
+ */
+const requireCredential = (
+  value: unknown,
+  name: "channelAccessToken" | "channelSecret"
+): string => {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new ValidationError(
+      "line",
+      `${name} must be a non-empty string. Get your credentials at: https://developers.line.biz/console/`
+    );
+  }
+
+  return value;
+};
+
 export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   readonly name = "line";
   readonly userName: string;
@@ -217,10 +236,15 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   private lifecycleHandlers = new Set<LineLifecycleHandler>();
 
   constructor(config: LineAdapterConfig) {
-    this.client = LineBotClient.fromChannelAccessToken({
-      channelAccessToken: config.channelAccessToken,
-    });
-    this.channelSecret = config.channelSecret;
+    const channelAccessToken = requireCredential(
+      config.channelAccessToken,
+      "channelAccessToken"
+    );
+    this.channelSecret = requireCredential(
+      config.channelSecret,
+      "channelSecret"
+    );
+    this.client = LineBotClient.fromChannelAccessToken({ channelAccessToken });
     this.userName = config.userName ?? "line-bot";
     this.logger = config.logger ?? new ConsoleLogger();
   }

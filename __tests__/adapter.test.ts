@@ -1,6 +1,7 @@
 /* eslint-disable max-classes-per-file */
 import crypto from "node:crypto";
 import { Readable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 
 import {
   AdapterRateLimitError,
@@ -774,6 +775,15 @@ describe("LineAdapter", () => {
       return await adapter.handleWebhook(makeRequest(body, sig));
     };
 
+    const deliverWith = async (
+      options: { waitUntil: (task: Promise<unknown>) => void },
+      ...events: Record<string, unknown>[]
+    ): Promise<Response> => {
+      const body = JSON.stringify({ destination: "ch-123", events });
+      const sig = generateSignature(body, validConfig.channelSecret);
+      return await adapter.handleWebhook(makeRequest(body, sig), options);
+    };
+
     beforeEach(async () => {
       mockChat = {
         getLogger: vi.fn(() => ({
@@ -1028,6 +1038,53 @@ describe("LineAdapter", () => {
 
       expect(response.status).toBe(401);
       expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("hands each handler's task to waitUntil", async () => {
+      const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
+      adapter.onLifecycleEvent(vi.fn());
+      adapter.onLifecycleEvent(vi.fn());
+
+      const response = await deliverWith({ waitUntil }, makeLifecycleEvent());
+
+      expect(response.status).toBe(200);
+      expect(waitUntil).toHaveBeenCalledTimes(2);
+    });
+
+    it("gives waitUntil a task that settles when the handler does", async () => {
+      const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
+      let finished = false;
+      adapter.onLifecycleEvent(async () => {
+        await delay(10);
+        finished = true;
+      });
+
+      await deliverWith({ waitUntil }, makeLifecycleEvent());
+      const [[task]] = waitUntil.mock.calls;
+
+      // The webhook has answered, but the handler is still waiting on its
+      // timer; only the task handed to waitUntil sees it through.
+      expect(finished).toBe(false);
+      await task;
+      expect(finished).toBe(true);
+    });
+
+    it("gives waitUntil a task that resolves even when the handler rejects", async () => {
+      const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
+      adapter.onLifecycleEvent(() => Promise.reject(new Error("nope")));
+
+      await deliverWith({ waitUntil }, makeLifecycleEvent());
+      const [[task]] = waitUntil.mock.calls;
+
+      await expect(task).resolves.toBeUndefined();
+    });
+
+    it("does not call waitUntil when no handler is registered", async () => {
+      const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
+
+      await deliverWith({ waitUntil }, makeLifecycleEvent());
+
+      expect(waitUntil).not.toHaveBeenCalled();
     });
   });
 

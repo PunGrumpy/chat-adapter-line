@@ -330,7 +330,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     for (const event of payload.events) {
       if (isLifecycleEvent(event)) {
-        this.dispatchLifecycleEvent(event, channelId);
+        this.dispatchLifecycleEvent(event, channelId, options);
         continue;
       }
 
@@ -404,7 +404,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   }
 
   /**
-   * Hands one lifecycle event to every registered handler.
+   * Hands one lifecycle event to every registered handler. Each handler's
+   * work goes to the webhook's `waitUntil`, when the caller passed one.
    *
    * Unlike message events, a redelivered or standby-mode lifecycle event is
    * still delivered, because a missed `unfollow` cannot be recovered the way
@@ -418,7 +419,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
    */
   private dispatchLifecycleEvent(
     event: LineLifecycleRawEvent,
-    channelId: string
+    channelId: string,
+    options?: WebhookOptions
   ): void {
     const sourceId = sourceIdFrom(event.source);
     if (!sourceId) {
@@ -438,7 +440,10 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     for (const handler of this.lifecycleHandlers) {
       // Deliberately not awaited: LINE expects the webhook to be
       // acknowledged promptly, so a slow handler must not hold up the 200.
-      void this.runLifecycleHandler(handler, lifecycle);
+      // waitUntil keeps a serverless runtime alive until the handler
+      // settles, as the Chat SDK does for message and action handlers.
+      const task = this.runLifecycleHandler(handler, lifecycle);
+      options?.waitUntil?.(task);
     }
   }
 

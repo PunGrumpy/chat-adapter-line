@@ -1,4 +1,5 @@
 import { ValidationError } from "@chat-adapter/shared";
+import { parseMarkdown } from "chat";
 import { describe, expect, it } from "vite-plus/test";
 
 import { LineFormatConverter } from "../../src/lib/format-converter.js";
@@ -45,6 +46,20 @@ describe("toLineMessages", () => {
         converter
       )
     ).toEqual([{ text: "a", type: "text" }]);
+  });
+
+  it("renders markdown and ast postables without rewriting their text", () => {
+    expect(
+      toLineMessages(
+        { markdown: "Get https://example.com/my_report_2024.pdf now" },
+        converter
+      )
+    ).toEqual([
+      { text: "Get https://example.com/my_report_2024.pdf now", type: "text" },
+    ]);
+    expect(
+      toLineMessages({ ast: parseMarkdown("Use `my_var * 2`") }, converter)
+    ).toEqual([{ text: "Use my_var * 2", type: "text" }]);
   });
 
   it("converts a card to a flex message", () => {

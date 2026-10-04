@@ -1,5 +1,27 @@
 # chat-adapter-line
 
+## 0.1.6
+
+### Patch Changes
+
+- 6f4f457: Never drop text from a streamed reply. `stream()` sent a new message every 500 characters and stopped after five, so the rest of any reply longer than about 2,500 characters was silently discarded, while the Chat SDK recorded the whole text as sent. It also skipped LINE's 5000-character limit and sent Markdown markers unrendered.
+
+  The adapter now collects the whole stream, renders it like a `markdown` postable, splits it at paragraph, line, or word breaks into messages within LINE's limit, and sends them five to a request, the first over the free Reply API when a reply token is fresh. A typical streamed reply now costs no message quota, where each message after the first used to be a billed push.
+
+- 39ac95e: Keep the adapter working when `getBotInfo` fails during initialization. A `429` used to be rethrown, and the Chat SDK keeps a failed initialization and replays it to every later webhook, so one rate-limited call at startup failed every webhook, for every adapter, until the process restarted. Any other failure pinned the channel ID to `"unknown"`, so thread IDs read `line:unknown:…` for the life of the process and changed after the next healthy start, orphaning the subscriptions and thread state stored under them.
+
+  Initialization now never throws and never guesses. The adapter takes the bot's user ID from the first webhook's `destination`, which LINE sets to the same value. Until a webhook arrives, `encodeThreadId()` throws a `ValidationError` instead of encoding `unknown`.
+
+- 186ed33: Keep lifecycle handlers running on serverless hosts. The adapter now hands each `onLifecycleEvent()` handler's work to the `waitUntil` passed in the webhook options, the way the Chat SDK already does for message and action handlers. It used to start handlers without registering them, so on Vercel Functions or with Next.js `after()` the runtime could stop once the `200` was sent, before a welcome message on `follow` went out. The webhook still answers without waiting for handlers.
+- e2d53d1: Show LINE's loading animation from `thread.startTyping()`. The adapter used to call LINE's Acquire Control API instead, a partner API for module channels: on a regular channel the call failed silently, so no indicator ever appeared, and on a channel attached as a module it would have switched chat control away from the primary channel. The animation shows in 1:1 chats for up to 20 seconds or until the bot's next message arrives, and a later `startTyping()` after the bot has replied shows it again.
+- 47d41f1: Render Markdown and AST postables to plain text from their parsed structure, instead of stripping a re-serialized Markdown string with patterns. The old path added Markdown escapes and then removed only the markers, so ordinary text was rewritten: underscores disappeared from URLs and file names (`my_report_2024.pdf`, `utm_source`), `snake_case` arrived as `snake\case`, `2 * 3` as `2 \ 3`, links lost their URLs, and code blocks kept a stray backtick and their language tag. Text now arrives as written. A link keeps its URL as `text (url)`, list items keep their `-` or `1.` markers, code keeps its exact text, and tables render as text.
+
+  `toPlainText()` keeps its signature and uses the same renderer. `LineFormatConverter.fromAst()` and `adapter.renderFormatted()` now return this plain text rather than Markdown. `renderPostable()` passes a plain string through unchanged, as the Chat SDK specifies. Inbound LINE text is no longer parsed as Markdown, so `message.formatted` keeps names like `__init__.py` intact.
+
+- 1fe155b: Answer a webhook whose `x-line-signature` header has the wrong length with a `401`, the same as any other wrong signature. The comparison used to throw when the header's byte length differed from a real signature's. Any caller could make the webhook route fail with the framework's `500` and an error log entry.
+
+  `new LineAdapter()` now rejects an empty or blank `channelSecret` or `channelAccessToken` with a `ValidationError`, as `createLineAdapter()` already did. An empty channel secret is a valid HMAC key that anyone can sign webhooks with.
+
 ## 0.1.5
 
 ### Patch Changes

@@ -4,7 +4,7 @@
 
 ## Install the package
 
-The adapter needs `chat` 4.17.0 or later:
+The adapter needs `chat` 4.17.0 or a later 4.x release:
 
 ```bash
 npm install chat-adapter-line chat

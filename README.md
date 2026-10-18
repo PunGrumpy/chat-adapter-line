@@ -63,7 +63,7 @@ LINE cannot edit a sent message, so `thread.post()` with a text stream, such as 
 
 ### Direct messages and mentions
 
-A LINE thread whose source is a single user is a direct message, so `bot.onDirectMessage()` fires for 1:1 chats. In groups and rooms, LINE delivers native mentions as structured data. The adapter parses them onto the message and sets `message.isMention` when someone mentions the bot, so `onNewMention()` and `onMention()` work without any `@name` text matching.
+A LINE thread whose source is a single user is a direct message, so `bot.onDirectMessage()` fires for 1:1 chats. In groups and rooms, LINE delivers native mentions as structured data. The adapter parses them onto the message and sets `message.isMention` when someone mentions the bot, so `onNewMention()` and `onMention()` work without any `@name` text matching. Each LINE conversation is its own Chat SDK channel, so `thread.channel.post()` sends to the same 1:1 chat, group, or room, and `thread.channel.setState()` keeps state for that conversation alone.
 
 Inbound text messages are `LineMessage` instances. Each entry in `message.mentions` has a `type` of `user` or `all`, plus `index` and `length` for its position in the text. User mentions also carry `userId` and `isSelf` when the mentioned user has shared their profile with the channel:
 

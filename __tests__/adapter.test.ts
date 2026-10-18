@@ -744,21 +744,42 @@ describe("LineAdapter", () => {
       expect(actionEvent.value).toBeUndefined();
     });
 
-    it("skips non-message events", async () => {
-      const payload = {
-        destination: "ch-123",
-        events: [
-          { source: { type: "user" }, timestamp: Date.now(), type: "follow" },
-        ],
-      };
-      const body = JSON.stringify(payload);
-      const sig = generateSignature(body, validConfig.channelSecret);
-      const request = makeRequest(body, sig);
+    it.each([
+      [
+        "an unsend event",
+        {
+          deliveryContext: { isRedelivery: false },
+          mode: "active",
+          source: { type: "user", userId: "u-123" },
+          timestamp: Date.now(),
+          type: "unsend",
+          unsend: { messageId: "msg-1" },
+          webhookEventId: "evt-unsend-1",
+        },
+      ],
+      [
+        "a beacon event",
+        {
+          beacon: { hwid: "d41d8cd98f", type: "enter" },
+          deliveryContext: { isRedelivery: false },
+          mode: "active",
+          replyToken: "reply-beacon",
+          source: { type: "user", userId: "u-123" },
+          timestamp: Date.now(),
+          type: "beacon",
+          webhookEventId: "evt-beacon-1",
+        },
+      ],
+    ])("skips %s it does not handle", async (_label, event) => {
+      const body = JSON.stringify({ destination: "ch-123", events: [event] });
 
-      const response = await adapter.handleWebhook(request);
+      const response = await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret))
+      );
 
       expect(response.status).toBe(200);
       expect(mockChat.processMessage).not.toHaveBeenCalled();
+      expect(mockChat.processAction).not.toHaveBeenCalled();
     });
 
     it("skips standby mode events", async () => {

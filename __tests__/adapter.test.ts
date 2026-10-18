@@ -645,6 +645,45 @@ describe("LineAdapter", () => {
 
       expect(response.status).toBe(200);
       expect(mockChat.processMessage).toHaveBeenCalledOnce();
+
+      const [chatAdapter, threadId, factory] = mockChat.processMessage.mock
+        .calls[0] as [unknown, string, () => Promise<LineMessage>];
+      expect(chatAdapter).toBe(adapter);
+      expect(threadId).toBe("line:bot-123:user:u-123");
+      await expect(factory()).resolves.toMatchObject({
+        text: "hello",
+        threadId: "line:bot-123:user:u-123",
+      });
+    });
+
+    it("passes the webhook options to processMessage", async () => {
+      const options = { waitUntil: vi.fn() };
+      const body = JSON.stringify({
+        destination: "ch-123",
+        events: [makeEvent()],
+      });
+
+      await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret)),
+        options
+      );
+
+      expect(mockChat.processMessage.mock.calls[0][3]).toBe(options);
+    });
+
+    it("passes the webhook options to processAction", async () => {
+      const options = { waitUntil: vi.fn() };
+      const body = JSON.stringify({
+        destination: "ch-123",
+        events: [makePostbackEvent()],
+      });
+
+      await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret)),
+        options
+      );
+
+      expect(mockChat.processAction.mock.calls[0][1]).toBe(options);
     });
 
     it("dispatches postback events as actions", async () => {

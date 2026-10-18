@@ -289,8 +289,15 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     return Promise.resolve();
   }
 
+  /**
+   * A LINE conversation has no threads inside it, so each 1:1 chat, group,
+   * or room is its own Chat SDK channel, named by its thread ID. The bot ID
+   * would put every conversation in one channel, sharing its state and
+   * locks, and `thread.channel.post()` could not tell where to send.
+   */
   channelIdFromThreadId(threadId: string): string {
-    return decodeThreadId(threadId).channelId;
+    const { channelId, sourceId, sourceType } = decodeThreadId(threadId);
+    return encodeThreadId(sourceType, channelId, sourceId);
   }
 
   /** A LINE thread is a DM when its source is a single user. */
@@ -931,7 +938,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return cached.info;
     }
 
-    const { sourceType, sourceId, channelId } = this.decodeThreadId(threadId);
+    const { sourceType, sourceId } = this.decodeThreadId(threadId);
+    const channelId = this.channelIdFromThreadId(threadId);
 
     let result: ThreadInfo;
 

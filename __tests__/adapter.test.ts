@@ -384,9 +384,13 @@ describe("LineAdapter", () => {
       await adapter.initialize(mockChat as never);
 
       expect(mocks.getBotInfo).toHaveBeenCalledOnce();
-      expect(adapter.channelIdFromThreadId("line:bot-123:user:u-1")).toBe(
-        "bot-123"
-      );
+      expect(
+        adapter.encodeThreadId({
+          channelId: "",
+          sourceId: "u-1",
+          sourceType: "user",
+        })
+      ).toBe("line:bot-123:user:u-1");
     });
 
     it("leaves the channel ID unset when bot info fails", async () => {
@@ -506,12 +510,17 @@ describe("LineAdapter", () => {
   });
 
   describe("channelIdFromThreadId", () => {
-    it("parses the channel ID from the thread ID", () => {
-      expect(adapter.channelIdFromThreadId("line:bot-123:user:u-1")).toBe(
-        "bot-123"
-      );
-      expect(adapter.channelIdFromThreadId("line:bot-9:group:g-1")).toBe(
-        "bot-9"
+    it.each([
+      "line:bot-123:user:u-1",
+      "line:bot-123:group:g-1",
+      "line:bot-123:room:r-1",
+    ])("makes the conversation %s its own channel", (threadId) => {
+      expect(adapter.channelIdFromThreadId(threadId)).toBe(threadId);
+    });
+
+    it("gives two conversations of one bot different channels", () => {
+      expect(adapter.channelIdFromThreadId("line:bot-123:user:u-1")).not.toBe(
+        adapter.channelIdFromThreadId("line:bot-123:user:u-2")
       );
     });
 
@@ -522,7 +531,23 @@ describe("LineAdapter", () => {
     });
 
     it("does not recurse when the SDK derives the channel ID", () => {
-      expect(deriveChannelId(adapter, "line:bot-123:user:u-1")).toBe("bot-123");
+      expect(deriveChannelId(adapter, "line:bot-123:user:u-1")).toBe(
+        "line:bot-123:user:u-1"
+      );
+    });
+
+    it("names a channel that postMessage can send to", async () => {
+      mocks.pushMessage.mockResolvedValue({ sentMessages: [{ id: "p-1" }] });
+
+      await adapter.postMessage(
+        adapter.channelIdFromThreadId("line:bot-123:group:g-1"),
+        "Hello group"
+      );
+
+      expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [{ text: "Hello group", type: "text" }],
+        to: "g-1",
+      });
     });
   });
 
@@ -2257,6 +2282,19 @@ describe("LineAdapter", () => {
       expect(result.metadata).toEqual({ sourceType: "room" });
       expect(mocks.getProfile).not.toHaveBeenCalled();
       expect(mocks.getGroupSummary).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      "line:bot-123:user:u-123",
+      "line:bot-123:group:g-123",
+      "line:bot-123:room:r-123",
+    ])("reports %s as its own channel", async (threadId) => {
+      mocks.getProfile.mockResolvedValue({ displayName: "John Doe" });
+      mocks.getGroupSummary.mockResolvedValue({ groupName: "My Group" });
+
+      const result = await adapter.fetchThread(threadId);
+
+      expect(result.channelId).toBe(threadId);
     });
 
     it("caches thread info for 5 minutes", async () => {

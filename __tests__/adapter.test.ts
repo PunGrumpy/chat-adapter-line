@@ -655,6 +655,45 @@ describe("LineAdapter", () => {
 
       expect(response.status).toBe(200);
       expect(mockChat.processMessage).toHaveBeenCalledOnce();
+
+      const [chatAdapter, threadId, factory] = mockChat.processMessage.mock
+        .calls[0] as [unknown, string, () => Promise<LineMessage>];
+      expect(chatAdapter).toBe(adapter);
+      expect(threadId).toBe("line:bot-123:user:u-123");
+      await expect(factory()).resolves.toMatchObject({
+        text: "hello",
+        threadId: "line:bot-123:user:u-123",
+      });
+    });
+
+    it("passes the webhook options to processMessage", async () => {
+      const options = { waitUntil: vi.fn() };
+      const body = JSON.stringify({
+        destination: "ch-123",
+        events: [makeEvent()],
+      });
+
+      await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret)),
+        options
+      );
+
+      expect(mockChat.processMessage.mock.calls[0][3]).toBe(options);
+    });
+
+    it("passes the webhook options to processAction", async () => {
+      const options = { waitUntil: vi.fn() };
+      const body = JSON.stringify({
+        destination: "ch-123",
+        events: [makePostbackEvent()],
+      });
+
+      await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret)),
+        options
+      );
+
+      expect(mockChat.processAction.mock.calls[0][1]).toBe(options);
     });
 
     it("dispatches postback events as actions", async () => {
@@ -715,21 +754,42 @@ describe("LineAdapter", () => {
       expect(actionEvent.value).toBeUndefined();
     });
 
-    it("skips non-message events", async () => {
-      const payload = {
-        destination: "ch-123",
-        events: [
-          { source: { type: "user" }, timestamp: Date.now(), type: "follow" },
-        ],
-      };
-      const body = JSON.stringify(payload);
-      const sig = generateSignature(body, validConfig.channelSecret);
-      const request = makeRequest(body, sig);
+    it.each([
+      [
+        "an unsend event",
+        {
+          deliveryContext: { isRedelivery: false },
+          mode: "active",
+          source: { type: "user", userId: "u-123" },
+          timestamp: Date.now(),
+          type: "unsend",
+          unsend: { messageId: "msg-1" },
+          webhookEventId: "evt-unsend-1",
+        },
+      ],
+      [
+        "a beacon event",
+        {
+          beacon: { hwid: "d41d8cd98f", type: "enter" },
+          deliveryContext: { isRedelivery: false },
+          mode: "active",
+          replyToken: "reply-beacon",
+          source: { type: "user", userId: "u-123" },
+          timestamp: Date.now(),
+          type: "beacon",
+          webhookEventId: "evt-beacon-1",
+        },
+      ],
+    ])("skips %s it does not handle", async (_label, event) => {
+      const body = JSON.stringify({ destination: "ch-123", events: [event] });
 
-      const response = await adapter.handleWebhook(request);
+      const response = await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret))
+      );
 
       expect(response.status).toBe(200);
       expect(mockChat.processMessage).not.toHaveBeenCalled();
+      expect(mockChat.processAction).not.toHaveBeenCalled();
     });
 
     it("skips standby mode events", async () => {
@@ -1549,6 +1609,36 @@ describe("LineAdapter", () => {
       expect(data?.toString()).toBe("file-bytes");
     });
 
+    it("joins content that arrives in several chunks", async () => {
+      mocks.getMessageContent.mockResolvedValue(
+        Readable.from([
+          Buffer.from("part-1|"),
+          Buffer.from("part-2|"),
+          "part-3",
+        ])
+      );
+      const event = makeEvent({
+        message: { id: "img-9", type: "image" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      const data = await attachment.fetchData?.();
+
+      expect(data?.toString()).toBe("part-1|part-2|part-3");
+    });
+
+    it("maps a rate-limited content download to AdapterRateLimitError", async () => {
+      mocks.getMessageContent.mockRejectedValue(makeRateLimitError(7));
+      const event = makeEvent({
+        message: { id: "img-429", type: "image" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      await expect(attachment.fetchData?.()).rejects.toBeInstanceOf(
+        AdapterRateLimitError
+      );
+    });
+
     it("drops the attachment when a media message carries no ID", () => {
       const event = makeEvent({
         message: { id: "", type: "image" },
@@ -1652,16 +1742,6 @@ describe("LineAdapter", () => {
         messages: [{ text: "as-is", type: "text" }],
         to: "u-123",
       });
-    });
-
-    it("limits to 5 messages", async () => {
-      mocks.pushMessage.mockResolvedValue({
-        sentMessages: [{ id: "sent-1" }],
-      });
-
-      await adapter.postMessage("line:bot-123:user:u-123", "msg1");
-
-      expect(mocks.pushMessage).toHaveBeenCalledOnce();
     });
 
     it("returns RawMessage with sent message ID", async () => {
@@ -2301,6 +2381,7 @@ describe("LineAdapter", () => {
 
       const result = await adapter.fetchThread("line:bot-123:user:u-123");
 
+      expect(mocks.getProfile).toHaveBeenCalledExactlyOnceWith("u-123");
       expect(result.isDM).toBe(true);
       expect(result.metadata).toEqual({ displayName: "John Doe" });
     });
@@ -2319,6 +2400,7 @@ describe("LineAdapter", () => {
 
       const result = await adapter.fetchThread("line:bot-123:group:g-123");
 
+      expect(mocks.getGroupSummary).toHaveBeenCalledExactlyOnceWith("g-123");
       expect(result.isDM).toBe(false);
       expect(result.channelName).toBe("My Group");
       expect(result.metadata).toEqual({ groupName: "My Group" });
@@ -2371,6 +2453,25 @@ describe("LineAdapter", () => {
 
       expect(result1).toBe(result2);
       expect(mocks.getProfile).toHaveBeenCalledOnce();
+    });
+
+    it("looks the thread up again once 5 minutes have passed", async () => {
+      mocks.getProfile.mockResolvedValue({ displayName: "John" });
+
+      vi.useFakeTimers();
+      try {
+        await adapter.fetchThread("line:bot-123:user:u-123");
+        vi.advanceTimersByTime(5 * 60 * 1000 - 1);
+        await adapter.fetchThread("line:bot-123:user:u-123");
+        expect(mocks.getProfile).toHaveBeenCalledOnce();
+
+        vi.advanceTimersByTime(2);
+        await adapter.fetchThread("line:bot-123:user:u-123");
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(mocks.getProfile).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -2277,6 +2277,7 @@ describe("LineAdapter", () => {
 
       const result = await adapter.fetchThread("line:bot-123:user:u-123");
 
+      expect(mocks.getProfile).toHaveBeenCalledExactlyOnceWith("u-123");
       expect(result.isDM).toBe(true);
       expect(result.metadata).toEqual({ displayName: "John Doe" });
     });
@@ -2295,6 +2296,7 @@ describe("LineAdapter", () => {
 
       const result = await adapter.fetchThread("line:bot-123:group:g-123");
 
+      expect(mocks.getGroupSummary).toHaveBeenCalledExactlyOnceWith("g-123");
       expect(result.isDM).toBe(false);
       expect(result.channelName).toBe("My Group");
       expect(result.metadata).toEqual({ groupName: "My Group" });
@@ -2347,6 +2349,25 @@ describe("LineAdapter", () => {
 
       expect(result1).toBe(result2);
       expect(mocks.getProfile).toHaveBeenCalledOnce();
+    });
+
+    it("looks the thread up again once 5 minutes have passed", async () => {
+      mocks.getProfile.mockResolvedValue({ displayName: "John" });
+
+      vi.useFakeTimers();
+      try {
+        await adapter.fetchThread("line:bot-123:user:u-123");
+        vi.advanceTimersByTime(5 * 60 * 1000 - 1);
+        await adapter.fetchThread("line:bot-123:user:u-123");
+        expect(mocks.getProfile).toHaveBeenCalledOnce();
+
+        vi.advanceTimersByTime(2);
+        await adapter.fetchThread("line:bot-123:user:u-123");
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(mocks.getProfile).toHaveBeenCalledTimes(2);
     });
   });
 

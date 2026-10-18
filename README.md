@@ -57,7 +57,7 @@ When your bot answers an inbound message, the adapter sends that first reply thr
 
 ### Streaming replies
 
-LINE cannot edit a sent message, so `thread.post()` with a text stream, such as an AI SDK `textStream`, cannot grow a message in place. The adapter collects the whole stream and renders it like a Markdown postable. It then sends as many text messages as LINE's 5000-character limit needs, five to a request. The first request goes through the free Reply API when a reply token is fresh. The adapter drops nothing, however long the reply. Call `thread.startTyping()` before you start generating, so a 1:1 chat shows LINE's loading animation while it waits.
+LINE cannot edit a sent message, so `thread.post()` with a text stream, such as an AI SDK `textStream`, cannot grow a message in place. The adapter collects the whole stream and renders it like a Markdown postable. It then sends as many text messages as LINE's 5000-character limit needs, five to a request. The first request goes through the free Reply API when a reply token is fresh. The adapter drops nothing, however long the reply. In a 1:1 chat, LINE's loading animation shows while the adapter collects the stream, renewed every 15 seconds until the stream ends. Call `thread.startTyping()` as well when your handler does other work before it starts streaming.
 
 ### Direct messages and mentions
 
@@ -80,7 +80,7 @@ bot.onSubscribedMessage(async (thread, message) => {
 
 ### Typing indicator
 
-`thread.startTyping()` shows LINE's loading animation in a 1:1 chat for up to 20 seconds, or until the bot's next message arrives. LINE has no typing indicator in groups or rooms, so the call does nothing there. A failed request is logged at debug level and never throws.
+`thread.startTyping()` shows LINE's loading animation in a 1:1 chat for up to 20 seconds, or until the bot's next message arrives. LINE has no typing indicator in groups or rooms, so the call does nothing there. A failed request is logged at debug level and never throws. While `thread.post()` collects a stream, the adapter renews the animation until the stream ends.
 
 ### Posting LINE-native messages
 

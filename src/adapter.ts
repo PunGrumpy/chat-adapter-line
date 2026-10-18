@@ -197,6 +197,13 @@ const LOADING_ANIMATION_SECONDS = 20;
 /** Skips repeat requests while the last animation is still showing. */
 const LOADING_ANIMATION_COOLDOWN_MS = 15_000;
 
+/**
+ * How often a stream that is still being read checks whether the loading
+ * animation needs renewing. A check is a map lookup. It requests a new
+ * animation once the cooldown has passed, before the last one runs out.
+ */
+const LOADING_ANIMATION_CHECK_MS = 1000;
+
 const extractStreamText = (chunk: string | StreamChunk): string => {
   if (typeof chunk === "string") {
     return chunk;
@@ -205,6 +212,17 @@ const extractStreamText = (chunk: string | StreamChunk): string => {
     return chunk.text;
   }
   return "";
+};
+
+/** Reads a stream to its end and joins its text. */
+const readStreamText = async (
+  textStream: AsyncIterable<string | StreamChunk>
+): Promise<string> => {
+  let markdown = "";
+  for await (const chunk of textStream) {
+    markdown += extractStreamText(chunk);
+  }
+  return markdown;
 };
 
 const readRequestId = (response: {
@@ -797,7 +815,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
    * whole stream, renders it the way it renders a `markdown` postable, splits
    * it into text messages within LINE's 5000-character limit, and sends them
    * five to a request. The first request uses the thread's reply token when
-   * one is fresh, so a typical reply costs no message quota.
+   * one is fresh, so a typical reply costs no message quota. In a 1:1 chat,
+   * LINE's loading animation shows until the stream ends.
    */
   async stream(
     threadId: string,
@@ -806,10 +825,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   ): Promise<RawMessage<LineEvent>> {
     const { sourceId } = this.decodeThreadId(threadId);
 
-    let markdown = "";
-    for await (const chunk of textStream) {
-      markdown += extractStreamText(chunk);
-    }
+    const markdown = await this.collectStream(threadId, textStream);
 
     // The Chat SDK records a streamed reply as Markdown, so render it
     // exactly like a `markdown` postable.
@@ -840,6 +856,34 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     // Report the first message: it opens the reply, and its quote token is
     // the one a later message would quote.
     return this.buildRawMessage(first ?? {}, text, threadId);
+  }
+
+  /**
+   * Reads a stream to its end while LINE's loading animation shows in a 1:1
+   * chat. The animation lasts LOADING_ANIMATION_SECONDS, often less than a
+   * generation takes, so it is renewed until the stream ends. The renewal in
+   * flight is awaited before returning, so it cannot reach LINE after the
+   * reply and show the animation again.
+   */
+  private async collectStream(
+    threadId: string,
+    textStream: AsyncIterable<string | StreamChunk>
+  ): Promise<string> {
+    if (!this.isDM(threadId)) {
+      return readStreamText(textStream);
+    }
+
+    let renewal = this.startTyping(threadId);
+    const timer = setInterval(() => {
+      renewal = this.startTyping(threadId);
+    }, LOADING_ANIMATION_CHECK_MS);
+
+    try {
+      return await readStreamText(textStream);
+    } finally {
+      clearInterval(timer);
+      await renewal;
+    }
   }
 
   private buildRawMessage(

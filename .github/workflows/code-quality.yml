@@ -23,6 +23,8 @@ jobs:
             command: bun run typecheck
           - name: Test
             command: bun run test
+          - name: Test (chat 4.17.0)
+            command: bun add --dev chat@4.17.0 && bun run typecheck && bun run test
     steps:
       - name: Checkout
         uses: actions/checkout@v6

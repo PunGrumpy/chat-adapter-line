@@ -747,20 +747,90 @@ describe("LineAdapter", () => {
       expect(actionEvent.user).toMatchObject({ userId: "u-123" });
     });
 
-    it("skips postback events with unparseable data", async () => {
-      const payload = {
+    it.each(["garbage", "action=buy&itemid=123"])(
+      "dispatches postback data %s without the adapter's encoding as the action ID",
+      async (data) => {
+        const body = JSON.stringify({
+          destination: "ch-123",
+          events: [makePostbackEvent({ postback: { data } })],
+        });
+
+        const response = await adapter.handleWebhook(
+          makeRequest(body, generateSignature(body, validConfig.channelSecret))
+        );
+
+        expect(response.status).toBe(200);
+        expect(mockChat.processMessage).not.toHaveBeenCalled();
+        const [[actionEvent]] = mockChat.processAction.mock.calls;
+        expect(actionEvent.actionId).toBe(data);
+        expect(actionEvent.value).toBeUndefined();
+      }
+    );
+
+    it.each([
+      ["date", { date: "2026-10-18" }, "2026-10-18"],
+      ["time", { time: "09:30" }, "09:30"],
+      ["datetime", { datetime: "2026-10-18T09:30" }, "2026-10-18T09:30"],
+    ])(
+      "delivers a %s picker's choice as the value",
+      async (_label, params, expected) => {
+        const body = JSON.stringify({
+          destination: "ch-123",
+          events: [
+            makePostbackEvent({ postback: { data: "id=pick", params } }),
+          ],
+        });
+
+        await adapter.handleWebhook(
+          makeRequest(body, generateSignature(body, validConfig.channelSecret))
+        );
+
+        const [[actionEvent]] = mockChat.processAction.mock.calls;
+        expect(actionEvent.actionId).toBe("pick");
+        expect(actionEvent.value).toBe(expected);
+      }
+    );
+
+    it("prefers a picker's choice over an encoded value", async () => {
+      const body = JSON.stringify({
         destination: "ch-123",
-        events: [makePostbackEvent({ postback: { data: "garbage" } })],
-      };
-      const body = JSON.stringify(payload);
-      const sig = generateSignature(body, validConfig.channelSecret);
-      const request = makeRequest(body, sig);
+        events: [
+          makePostbackEvent({
+            postback: {
+              data: "id=pick&v=default",
+              params: { datetime: "2026-10-18T09:30" },
+            },
+          }),
+        ],
+      });
 
-      const response = await adapter.handleWebhook(request);
+      await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret))
+      );
 
-      expect(response.status).toBe(200);
-      expect(mockChat.processAction).not.toHaveBeenCalled();
-      expect(mockChat.processMessage).not.toHaveBeenCalled();
+      const [[actionEvent]] = mockChat.processAction.mock.calls;
+      expect(actionEvent.value).toBe("2026-10-18T09:30");
+    });
+
+    it("delivers a picker's choice with unencoded data", async () => {
+      const body = JSON.stringify({
+        destination: "ch-123",
+        events: [
+          makePostbackEvent({
+            postback: { data: "pick-time", params: { time: "21:00" } },
+          }),
+        ],
+      });
+
+      await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret))
+      );
+
+      const [[actionEvent]] = mockChat.processAction.mock.calls;
+      expect(actionEvent).toMatchObject({
+        actionId: "pick-time",
+        value: "21:00",
+      });
     });
 
     it("dispatches postback without value as action without value", async () => {

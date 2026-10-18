@@ -244,6 +244,29 @@ The adapter checks the envelope only. LINE validates the component tree itself, 
 
 Like cards, Flex Messages cannot carry a `quoteToken` or `mentions`. Both combinations throw a `ValidationError`. Delivery uses the same reply-first, push-fallback path as text, and `broadcastMessages()` and `multicastMessages()` accept `flex` postables too.
 
+### Buttons and postbacks
+
+LINE reports a tap on a postback action as a postback webhook, and the adapter hands it to `bot.onAction()`. A card button arrives with its `id` as `event.actionId` and its `value` as `event.value`.
+
+Any other postback data, from a `postback` action in a `flex` postable, a rich menu, or a quick reply, arrives unchanged as `event.actionId`. To make such an action arrive like a card button instead, build its `data` with `serializePostbackData(id, value)`. The adapter reads data in that `id=…&v=…` form as an ID and a value.
+
+A datetime picker's choice arrives as `event.value`, in LINE's `date`, `time`, or `datetime` format, ahead of any encoded value. `event.raw` holds the whole LINE postback event:
+
+```typescript
+import { serializePostbackData } from "chat-adapter-line";
+
+const pickDay = {
+  type: "datetimepicker",
+  label: "Pick a day",
+  mode: "date",
+  data: serializePostbackData("delivery-day"),
+};
+
+bot.onAction("delivery-day", async (event) => {
+  await event.thread?.post(`Delivering on ${event.value}`);
+});
+```
+
 ### Inbound media
 
 An image, video, audio, or file message arrives with a Chat SDK attachment that fetches the content on demand, and with `message.media` describing it without fetching anything:

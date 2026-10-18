@@ -4,8 +4,10 @@
 
 ## Install the package
 
+The adapter needs `chat` 4.17.0 or later:
+
 ```bash
-npm install chat-adapter-line
+npm install chat-adapter-line chat
 ```
 
 ## Set up a bot

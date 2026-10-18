@@ -20,7 +20,7 @@
         "vite-plus": "latest",
       },
       "peerDependencies": {
-        "chat": ">=4.0.0",
+        "chat": "^4.17.0",
       },
     },
   },

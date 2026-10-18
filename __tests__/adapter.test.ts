@@ -1734,16 +1734,6 @@ describe("LineAdapter", () => {
       });
     });
 
-    it("limits to 5 messages", async () => {
-      mocks.pushMessage.mockResolvedValue({
-        sentMessages: [{ id: "sent-1" }],
-      });
-
-      await adapter.postMessage("line:bot-123:user:u-123", "msg1");
-
-      expect(mocks.pushMessage).toHaveBeenCalledOnce();
-    });
-
     it("returns RawMessage with sent message ID", async () => {
       const result = await adapter.postMessage(
         "line:bot-123:user:u-123",

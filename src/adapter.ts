@@ -482,25 +482,23 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
    * Dispatches a LINE postback event to the Chat SDK's action handlers
    * (`chat.onAction`). Button clicks arrive as postback webhooks, so this
    * is the only path by which flex message buttons become ActionEvents.
+   *
+   * Card buttons encode their ID and value as `id=…&v=…`. Any other data,
+   * from a hand-built Flex action, a rich menu, or a quick reply, becomes
+   * the action ID as it is.
    */
   private processPostbackEvent(
     event: LinePostbackEvent,
     threadId: string,
     options?: WebhookOptions
   ): void {
-    const data = deserializePostbackData(event.postback.data);
-    if (!data) {
-      this.logger.debug("Skipping postback with unparseable data", {
-        data: event.postback.data,
-      });
-      return;
-    }
-
+    const { data } = event.postback;
+    const encoded = deserializePostbackData(data);
     const userId = event.source.userId ?? "unknown";
 
     this.chat?.processAction(
       {
-        actionId: data.id,
+        actionId: encoded?.id ?? data,
         adapter: this,
         messageId: event.webhookEventId,
         raw: event,
@@ -512,7 +510,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
           userId,
           userName: userId,
         },
-        value: data.value,
+        value: encoded?.value,
       },
       options
     );

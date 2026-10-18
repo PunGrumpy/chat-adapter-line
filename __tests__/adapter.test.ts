@@ -673,21 +673,25 @@ describe("LineAdapter", () => {
       expect(actionEvent.user).toMatchObject({ userId: "u-123" });
     });
 
-    it("skips postback events with unparseable data", async () => {
-      const payload = {
-        destination: "ch-123",
-        events: [makePostbackEvent({ postback: { data: "garbage" } })],
-      };
-      const body = JSON.stringify(payload);
-      const sig = generateSignature(body, validConfig.channelSecret);
-      const request = makeRequest(body, sig);
+    it.each(["garbage", "action=buy&itemid=123"])(
+      "dispatches postback data %s without the adapter's encoding as the action ID",
+      async (data) => {
+        const body = JSON.stringify({
+          destination: "ch-123",
+          events: [makePostbackEvent({ postback: { data } })],
+        });
 
-      const response = await adapter.handleWebhook(request);
+        const response = await adapter.handleWebhook(
+          makeRequest(body, generateSignature(body, validConfig.channelSecret))
+        );
 
-      expect(response.status).toBe(200);
-      expect(mockChat.processAction).not.toHaveBeenCalled();
-      expect(mockChat.processMessage).not.toHaveBeenCalled();
-    });
+        expect(response.status).toBe(200);
+        expect(mockChat.processMessage).not.toHaveBeenCalled();
+        const [[actionEvent]] = mockChat.processAction.mock.calls;
+        expect(actionEvent.actionId).toBe(data);
+        expect(actionEvent.value).toBeUndefined();
+      }
+    );
 
     it("dispatches postback without value as action without value", async () => {
       const payload = {

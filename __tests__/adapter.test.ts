@@ -1599,6 +1599,36 @@ describe("LineAdapter", () => {
       expect(data?.toString()).toBe("file-bytes");
     });
 
+    it("joins content that arrives in several chunks", async () => {
+      mocks.getMessageContent.mockResolvedValue(
+        Readable.from([
+          Buffer.from("part-1|"),
+          Buffer.from("part-2|"),
+          "part-3",
+        ])
+      );
+      const event = makeEvent({
+        message: { id: "img-9", type: "image" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      const data = await attachment.fetchData?.();
+
+      expect(data?.toString()).toBe("part-1|part-2|part-3");
+    });
+
+    it("maps a rate-limited content download to AdapterRateLimitError", async () => {
+      mocks.getMessageContent.mockRejectedValue(makeRateLimitError(7));
+      const event = makeEvent({
+        message: { id: "img-429", type: "image" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      await expect(attachment.fetchData?.()).rejects.toBeInstanceOf(
+        AdapterRateLimitError
+      );
+    });
+
     it("drops the attachment when a media message carries no ID", () => {
       const event = makeEvent({
         message: { id: "", type: "image" },

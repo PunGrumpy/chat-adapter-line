@@ -207,6 +207,17 @@ const extractStreamText = (chunk: string | StreamChunk): string => {
   return "";
 };
 
+/** Reads a stream to its end and joins its text. */
+const readStreamText = async (
+  textStream: AsyncIterable<string | StreamChunk>
+): Promise<string> => {
+  let markdown = "";
+  for await (const chunk of textStream) {
+    markdown += extractStreamText(chunk);
+  }
+  return markdown;
+};
+
 const readRequestId = (response: {
   httpResponse: Response;
 }): string | undefined =>
@@ -806,10 +817,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   ): Promise<RawMessage<LineEvent>> {
     const { sourceId } = this.decodeThreadId(threadId);
 
-    let markdown = "";
-    for await (const chunk of textStream) {
-      markdown += extractStreamText(chunk);
-    }
+    const markdown = await readStreamText(textStream);
 
     // The Chat SDK records a streamed reply as Markdown, so render it
     // exactly like a `markdown` postable.

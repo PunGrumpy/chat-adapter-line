@@ -693,6 +693,72 @@ describe("LineAdapter", () => {
       }
     );
 
+    it.each([
+      ["date", { date: "2026-10-18" }, "2026-10-18"],
+      ["time", { time: "09:30" }, "09:30"],
+      ["datetime", { datetime: "2026-10-18T09:30" }, "2026-10-18T09:30"],
+    ])(
+      "delivers a %s picker's choice as the value",
+      async (_label, params, expected) => {
+        const body = JSON.stringify({
+          destination: "ch-123",
+          events: [
+            makePostbackEvent({ postback: { data: "id=pick", params } }),
+          ],
+        });
+
+        await adapter.handleWebhook(
+          makeRequest(body, generateSignature(body, validConfig.channelSecret))
+        );
+
+        const [[actionEvent]] = mockChat.processAction.mock.calls;
+        expect(actionEvent.actionId).toBe("pick");
+        expect(actionEvent.value).toBe(expected);
+      }
+    );
+
+    it("prefers a picker's choice over an encoded value", async () => {
+      const body = JSON.stringify({
+        destination: "ch-123",
+        events: [
+          makePostbackEvent({
+            postback: {
+              data: "id=pick&v=default",
+              params: { datetime: "2026-10-18T09:30" },
+            },
+          }),
+        ],
+      });
+
+      await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret))
+      );
+
+      const [[actionEvent]] = mockChat.processAction.mock.calls;
+      expect(actionEvent.value).toBe("2026-10-18T09:30");
+    });
+
+    it("delivers a picker's choice with unencoded data", async () => {
+      const body = JSON.stringify({
+        destination: "ch-123",
+        events: [
+          makePostbackEvent({
+            postback: { data: "pick-time", params: { time: "21:00" } },
+          }),
+        ],
+      });
+
+      await adapter.handleWebhook(
+        makeRequest(body, generateSignature(body, validConfig.channelSecret))
+      );
+
+      const [[actionEvent]] = mockChat.processAction.mock.calls;
+      expect(actionEvent).toMatchObject({
+        actionId: "pick-time",
+        value: "21:00",
+      });
+    });
+
     it("dispatches postback without value as action without value", async () => {
       const payload = {
         destination: "ch-123",

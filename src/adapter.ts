@@ -485,14 +485,16 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
    *
    * Card buttons encode their ID and value as `id=…&v=…`. Any other data,
    * from a hand-built Flex action, a rich menu, or a quick reply, becomes
-   * the action ID as it is.
+   * the action ID as it is. A date or time picker's choice becomes the
+   * value, ahead of an encoded `v`, because the choice is what the user
+   * answered.
    */
   private processPostbackEvent(
     event: LinePostbackEvent,
     threadId: string,
     options?: WebhookOptions
   ): void {
-    const { data } = event.postback;
+    const { data, params } = event.postback;
     const encoded = deserializePostbackData(data);
     const userId = event.source.userId ?? "unknown";
 
@@ -510,7 +512,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
           userId,
           userName: userId,
         },
-        value: encoded?.value,
+        value:
+          params?.datetime ?? params?.date ?? params?.time ?? encoded?.value,
       },
       options
     );

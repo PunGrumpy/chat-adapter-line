@@ -1,5 +1,6 @@
 /* eslint-disable max-classes-per-file */
 import crypto from "node:crypto";
+import { once } from "node:events";
 import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -222,6 +223,15 @@ const createRepeatedChunks = async function* createRepeatedChunksGen(
   for (let i = 0; i < count; i += 1) {
     yield text;
   }
+};
+
+// Yields "Hello", then waits for `gate` to emit "release" before " world".
+const gatedChunks = async function* gatedChunksGen(
+  gate: EventTarget
+): AsyncGenerator<string> {
+  yield "Hello";
+  await once(gate, "release");
+  yield " world";
 };
 
 const createSingleChunk = async function* createSingleChunkGen(
@@ -2008,6 +2018,12 @@ describe("LineAdapter", () => {
       });
     });
 
+    // A test that fails before its stream reads the queued responses must
+    // not leave them for the tests that follow.
+    afterEach(() => {
+      mocks.showLoadingAnimation.mockReset();
+    });
+
     it("sends buffered text when stream ends", async () => {
       const result = await adapter.stream(
         "line:bot-123:user:u-123",
@@ -2045,6 +2061,94 @@ describe("LineAdapter", () => {
           { text: "a".repeat(10), type: "text" },
         ],
         to: "u-123",
+      });
+    });
+
+    it("keeps the loading animation up until a slow stream ends", async () => {
+      mocks.showLoadingAnimation.mockResolvedValue({});
+      const gate = new EventTarget();
+
+      vi.useFakeTimers();
+      try {
+        const sent = adapter.stream(
+          "line:bot-123:user:u-123",
+          gatedChunks(gate)
+        );
+
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mocks.showLoadingAnimation).toHaveBeenCalledExactlyOnceWith({
+          chatId: "u-123",
+          loadingSeconds: 20,
+        });
+
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(mocks.showLoadingAnimation).toHaveBeenCalledTimes(2);
+
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(mocks.showLoadingAnimation).toHaveBeenCalledTimes(3);
+
+        gate.dispatchEvent(new Event("release"));
+        await sent;
+        await vi.advanceTimersByTimeAsync(60_000);
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(mocks.showLoadingAnimation).toHaveBeenCalledTimes(3);
+      expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [{ text: "Hello world", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("waits for a loading animation request in flight before sending", async () => {
+      const renewal = new EventTarget();
+      mocks.showLoadingAnimation
+        .mockResolvedValueOnce({})
+        .mockReturnValueOnce(once(renewal, "done"));
+      const gate = new EventTarget();
+
+      vi.useFakeTimers();
+      try {
+        const sent = adapter.stream(
+          "line:bot-123:user:u-123",
+          gatedChunks(gate)
+        );
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(mocks.showLoadingAnimation).toHaveBeenCalledTimes(2);
+
+        gate.dispatchEvent(new Event("release"));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mocks.pushMessage).not.toHaveBeenCalled();
+
+        renewal.dispatchEvent(new Event("done"));
+        await sent;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(mocks.pushMessage).toHaveBeenCalledOnce();
+    });
+
+    it("sends the reply when the loading animation request fails", async () => {
+      mocks.showLoadingAnimation.mockRejectedValueOnce(new Error("down"));
+
+      const result = await adapter.stream(
+        "line:bot-123:user:u-123",
+        helloWorldChunks()
+      );
+
+      expect(result.id).toBe("sent-1");
+      expect(mocks.pushMessage).toHaveBeenCalledOnce();
+    });
+
+    it("shows no loading animation while a group stream is read", async () => {
+      await adapter.stream("line:bot-123:group:g-123", helloWorldChunks());
+
+      expect(mocks.showLoadingAnimation).not.toHaveBeenCalled();
+      expect(mocks.pushMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Hello world", type: "text" }],
+        to: "g-123",
       });
     });
 

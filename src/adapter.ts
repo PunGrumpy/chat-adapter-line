@@ -188,20 +188,13 @@ const toRateLimitError = (
 const DUMMY_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
 
 /**
- * How long LINE shows the loading animation, in seconds. LINE accepts
- * multiples of 5 up to 60 and hides the animation as soon as the bot's next
- * message arrives.
+ * LINE accepts multiples of 5 up to 60, and hides the animation early when
+ * the bot's next message arrives.
  */
 const LOADING_ANIMATION_SECONDS = 20;
 
-/** Skips repeat requests while the last animation is still showing. */
 const LOADING_ANIMATION_COOLDOWN_MS = 15_000;
 
-/**
- * How often a stream that is still being read checks whether the loading
- * animation needs renewing. A check is a map lookup. It requests a new
- * animation once the cooldown has passed, before the last one runs out.
- */
 const LOADING_ANIMATION_CHECK_MS = 1000;
 
 const extractStreamText = (chunk: string | StreamChunk): string => {
@@ -864,13 +857,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     return this.buildRawMessage(first ?? {}, text, threadId);
   }
 
-  /**
-   * Reads a stream to its end while LINE's loading animation shows in a 1:1
-   * chat. The animation lasts LOADING_ANIMATION_SECONDS, often less than a
-   * generation takes, so it is renewed until the stream ends. The renewal in
-   * flight is awaited before returning, so it cannot reach LINE after the
-   * reply and show the animation again.
-   */
   private async collectStream(
     threadId: string,
     textStream: AsyncIterable<string | StreamChunk>
@@ -888,6 +874,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return await readStreamText(textStream);
     } finally {
       clearInterval(timer);
+      // A renewal reaching LINE after the reply would bring the animation back.
       await renewal;
     }
   }

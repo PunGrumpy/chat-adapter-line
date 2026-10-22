@@ -86,11 +86,11 @@ const rejectSubstitutions = (options: LineTextOptions, kind: string): void => {
 /**
  * Converts one postable into LINE Messaging API message objects.
  *
- * Cards and `flex` payloads become Flex Messages, audio, locations, and
- * stickers become native messages of their own, and everything else
- * renders to text. Quote tokens and mentions are only accepted where LINE
- * can carry them; other combinations throw instead of silently dropping
- * the LINE-specific data.
+ * Cards and `flex` payloads become Flex Messages. Audio, image, video,
+ * location, and sticker postables become native messages of their own,
+ * and everything else renders to text. Quote tokens, mentions, and emoji
+ * are only accepted where LINE can carry them; other combinations throw
+ * instead of silently dropping the LINE-specific data.
  */
 export const toLineMessages = (
   message: LinePostableMessage,

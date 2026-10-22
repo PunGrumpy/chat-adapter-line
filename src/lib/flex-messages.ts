@@ -135,6 +135,9 @@ const buildFooterContents = (card: CardElement): messagingApi.FlexButton[] => {
  *
  * The card title, text, and section children become the bubble body;
  * buttons inside actions become the bubble footer as postback actions.
+ * Other elements, and buttons without an ID, are left out. A card with no
+ * body gets the text "Empty Card", and a card with no title gets
+ * "Flex Message" as its notification text.
  */
 export const buildFlexMessage = (
   card: CardElement

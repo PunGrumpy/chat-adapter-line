@@ -7,7 +7,6 @@ import type {
   PostableRaw,
 } from "chat";
 
-/** Configuration for the LINE adapter */
 export interface LineAdapterConfig {
   channelAccessToken: string;
   channelSecret: string;
@@ -15,7 +14,6 @@ export interface LineAdapterConfig {
   logger?: Logger;
 }
 
-/** Decoded thread ID components */
 export interface LineThreadId {
   channelId: string;
   sourceType: "user" | "group" | "room";
@@ -121,7 +119,6 @@ export interface LineMediaMetadata {
   /** LINE's ID for the message carrying the media, used to fetch it. */
   providerMessageId: string;
   kind: "image" | "video" | "audio" | "file";
-  /** Name the sender's device gave the file. */
   fileName?: string;
   /** Size of the file in bytes. */
   fileSize?: number;
@@ -130,7 +127,6 @@ export interface LineMediaMetadata {
   contentProvider?: LineContentProvider;
 }
 
-/** Who a LINE webhook event came from. */
 export interface LineEventSource {
   type: "user" | "group" | "room";
   userId?: string;
@@ -138,7 +134,6 @@ export interface LineEventSource {
   roomId?: string;
 }
 
-/** Raw LINE webhook message event */
 export interface LineMessageEvent {
   type: "message";
   message: {
@@ -182,7 +177,6 @@ export interface LineMessageEvent {
   };
 }
 
-/** Raw LINE webhook postback event */
 export interface LinePostbackEvent {
   type: "postback";
   postback: {
@@ -214,12 +208,10 @@ export type LineLifecycleEventType =
   | "memberJoined"
   | "memberLeft";
 
-/** Raw LINE webhook lifecycle event */
 export interface LineLifecycleRawEvent {
   type: LineLifecycleEventType;
   timestamp: number;
   source: LineEventSource;
-  /** LINE issues one for `follow`, `join`, and `memberJoined` only. */
   replyToken?: string;
   mode: "active" | "standby";
   webhookEventId: string;
@@ -248,24 +240,19 @@ export interface LineLifecycleEvent {
   /** Thread the event happened in, in the adapter's encoded form. */
   threadId: string;
   sourceType: "user" | "group" | "room";
-  /** The user, group, or room ID LINE named as the source. */
   sourceId: string;
-  /** The acting user, when LINE identifies one. */
   userId?: string;
-  /** When LINE recorded the event. */
   timestamp: Date;
   /** LINE's unique ID for this delivery. Deduplicate on it. */
   webhookEventId: string;
   mode: "active" | "standby";
-  /** True when LINE is redelivering an event it already sent. */
   isRedelivery: boolean;
-  /** Reply token, on the events LINE issues one for. */
+  /** Set on `follow`, `join`, and `memberJoined` only. */
   replyToken?: string;
   /** Who joined or left, on `memberJoined` and `memberLeft`. */
   members?: string[];
   /** On `follow`, true when a user unblocked rather than added the bot. */
   isUnblocked?: boolean;
-  /** The event as LINE sent it. */
   raw: LineLifecycleRawEvent;
 }
 
@@ -274,13 +261,11 @@ export type LineLifecycleHandler = (
   event: LineLifecycleEvent
 ) => void | Promise<void>;
 
-/** Raw LINE webhook payload (top-level) */
 export interface LineWebhookPayload {
   destination: string;
   events: (LineEvent | Record<string, unknown>)[];
 }
 
-/** Response from LINE send message API */
 export interface LineRawMessage {
   sentMessages: {
     id: string;
@@ -314,20 +299,17 @@ export interface LineEmojiSegment {
   emojiId: string;
 }
 
-/** LINE-specific options accepted on outbound text messages. */
 export interface LineTextOptions {
   /**
    * Quote token of the message to quote, taken from an inbound
    * `LineMessage.quoteToken` or from a previously sent message.
    */
   quoteToken?: string;
-  /** Native mentions to encode into the text. */
   mentions?: LineMentionSegment[];
   /** Native LINE emoji to substitute for `$` characters in the text. */
   emojis?: LineEmojiSegment[];
 }
 
-/** Plain text with optional LINE quote and mention data. */
 export interface LinePostableText extends LineTextOptions {
   text: string;
 }
@@ -345,17 +327,14 @@ export interface LineMediaUrls {
   previewImageUrl: string;
 }
 
-/** Native LINE image message. */
 export interface LinePostableImage {
   image: LineMediaUrls;
 }
 
-/** Native LINE video message. */
 export interface LinePostableVideo {
   video: LineMediaUrls;
 }
 
-/** Native LINE audio message. */
 export interface LinePostableAudio {
   audio: {
     /** HTTPS URL of the audio file. */
@@ -416,7 +395,6 @@ export interface LinePostableFlex {
   flex: {
     /** Notification and chat-list text. Required, and at most 400 characters. */
     altText: string;
-    /** A `bubble` or `carousel` container. */
     contents: messagingApi.FlexContainer;
   };
 }
@@ -442,7 +420,6 @@ export type LinePostableMessage =
   | (PostableMarkdown & Pick<LineTextOptions, "quoteToken">)
   | (PostableAst & Pick<LineTextOptions, "quoteToken">);
 
-/** Options for `LineAdapter.broadcastMessages`. */
 export interface LineBroadcastOptions {
   /**
    * Idempotency key forwarded as `X-Line-Retry-Key`. Must be a UUID. Reuse
@@ -454,13 +431,11 @@ export interface LineBroadcastOptions {
   notificationDisabled?: boolean;
 }
 
-/** Options for `LineAdapter.multicastMessages`. */
 export interface LineMulticastOptions extends LineBroadcastOptions {
   /** Aggregation unit name for LINE's per-unit statistics. At most one. */
   customAggregationUnits?: string[];
 }
 
-/** Result of a broadcast or multicast submission. */
 export interface LineBatchSendResult {
   /** LINE's `X-Line-Request-Id` for the accepted request, when returned. */
   requestId?: string;

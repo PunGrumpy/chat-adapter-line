@@ -139,11 +139,6 @@ const getMimeType = (kind: LineMediaMetadata["kind"]): string => {
   return "application/octet-stream";
 };
 
-/**
- * LINE reports an expired or already used reply token as HTTP 400. Only that
- * case falls back to push, because a 400 caused by the request payload did
- * not consume the reply token and may have already sent messages.
- */
 const parseLineErrorMessage = (body: string): string | undefined => {
   try {
     const parsed: unknown = JSON.parse(body);
@@ -162,10 +157,12 @@ const parseLineErrorMessage = (body: string): string | undefined => {
   return undefined;
 };
 
-const isReplyTokenError = (error: unknown): boolean =>
+const INVALID_REPLY_TOKEN_MESSAGE = "Invalid reply token";
+
+const isInvalidReplyTokenError = (error: unknown): boolean =>
   error instanceof HTTPFetchError &&
   error.status === 400 &&
-  parseLineErrorMessage(error.body) === "Invalid reply token";
+  parseLineErrorMessage(error.body) === INVALID_REPLY_TOKEN_MESSAGE;
 
 /** Converts a LINE 429 to the Chat SDK's rate-limit error. */
 const toRateLimitError = (
@@ -781,7 +778,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         throw rateLimit;
       }
 
-      if (!isReplyTokenError(error)) {
+      if (!isInvalidReplyTokenError(error)) {
         throw error;
       }
 

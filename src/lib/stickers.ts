@@ -12,10 +12,8 @@ import { isRecord } from "./is-record.js";
 /** LINE returns at most 15 keywords, chosen at random when the sticker has more. */
 export const MAX_STICKER_KEYWORDS = 15;
 
-/** Package and sticker IDs are decimal strings in LINE's sticker definitions. */
 const STICKER_ID_PATTERN = /^\d+$/;
 
-/** Resource types LINE renders from the sticker alone, so a bot can send them. */
 const SENDABLE_RESOURCE_TYPES: ReadonlySet<string> = new Set([
   "STATIC",
   "ANIMATION",
@@ -25,12 +23,7 @@ const SENDABLE_RESOURCE_TYPES: ReadonlySet<string> = new Set([
   "POPUP_SOUND",
 ]);
 
-/**
- * Resource types that carry text the sender typed. They sit outside the
- * sticker definitions a bot can send, so echoing one back by its IDs would
- * deliver a different sticker than the one received.
- */
-const SENDER_TEXT_RESOURCE_TYPES: ReadonlySet<string> = new Set([
+const UNSENDABLE_RESOURCE_TYPES: ReadonlySet<string> = new Set([
   "CUSTOM",
   "MESSAGE",
   "NAME_TEXT",
@@ -38,7 +31,7 @@ const SENDER_TEXT_RESOURCE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 const isKnownResourceType = (value: string): boolean =>
-  SENDABLE_RESOURCE_TYPES.has(value) || SENDER_TEXT_RESOURCE_TYPES.has(value);
+  SENDABLE_RESOURCE_TYPES.has(value) || UNSENDABLE_RESOURCE_TYPES.has(value);
 
 const readResourceType = (
   value: unknown
@@ -115,13 +108,7 @@ const readStickerId = (value: unknown, field: string): string => {
   return value;
 };
 
-/**
- * Only the resource types LINE personalizes are refused. An unfamiliar one is
- * let through, because the outbound sticker message never carries the
- * resource type at all, and LINE asks integrations to tolerate types it adds
- * later rather than fail on them.
- */
-const validateResourceType = (value: unknown): void => {
+const rejectUnsendableResourceType = (value: unknown): void => {
   if (value === undefined) {
     return;
   }
@@ -133,7 +120,7 @@ const validateResourceType = (value: unknown): void => {
     );
   }
 
-  if (SENDER_TEXT_RESOURCE_TYPES.has(value)) {
+  if (UNSENDABLE_RESOURCE_TYPES.has(value)) {
     throw new ValidationError(
       "line",
       `LINE cannot send a ${value} sticker, because its text comes from the sender. Send a sticker from LINE's sticker definitions instead.`
@@ -159,7 +146,7 @@ export const buildStickerMessage = (
 
   const packageId = readStickerId(sticker.packageId, "packageId");
   const stickerId = readStickerId(sticker.stickerId, "stickerId");
-  validateResourceType(sticker.resourceType);
+  rejectUnsendableResourceType(sticker.resourceType);
 
   const quote =
     options.quoteToken === undefined ? {} : { quoteToken: options.quoteToken };

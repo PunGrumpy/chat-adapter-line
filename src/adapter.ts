@@ -263,7 +263,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     string,
     { info: ThreadInfo; expires: number }
   >();
-  private lastTypingTime = new Map<string, number>();
+  private loadingAnimationShownAt = new Map<string, number>();
   private replyTokens = new ReplyTokenStore();
   private lifecycleHandlers = new Set<LineLifecycleHandler>();
 
@@ -757,9 +757,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     sourceId: string,
     messages: messagingApi.Message[]
   ): Promise<SendResult> {
-    // LINE hides the loading animation once a message arrives, so the next
-    // startTyping() has to ask for it again.
-    this.lastTypingTime.delete(threadId);
+    this.loadingAnimationShownAt.delete(threadId);
 
     const replyToken = this.replyTokens.take(threadId);
 
@@ -1079,8 +1077,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return;
     }
 
-    const last = this.lastTypingTime.get(threadId);
-    if (last && Date.now() - last < LOADING_ANIMATION_COOLDOWN_MS) {
+    const shownAt = this.loadingAnimationShownAt.get(threadId);
+    if (shownAt && Date.now() - shownAt < LOADING_ANIMATION_COOLDOWN_MS) {
       return;
     }
 
@@ -1091,7 +1089,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         chatId: sourceId,
         loadingSeconds: LOADING_ANIMATION_SECONDS,
       });
-      this.lastTypingTime.set(threadId, Date.now());
+      this.loadingAnimationShownAt.set(threadId, Date.now());
     } catch (error) {
       this.logger.debug("Failed to show the loading animation", {
         error,

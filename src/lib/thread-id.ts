@@ -70,9 +70,6 @@ export const decodeThreadId = (threadId: string): LineThreadId => {
   return { channelId, sourceId, sourceType };
 };
 
-/**
- * Check if a thread ID represents a 1:1 DM.
- */
 export const isDM = (threadId: string): boolean => {
   try {
     const { sourceType } = decodeThreadId(threadId);

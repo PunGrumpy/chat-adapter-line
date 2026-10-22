@@ -8,10 +8,6 @@ import type {
 } from "../types.js";
 import { isRecord } from "./is-record.js";
 
-/**
- * Reads LINE's `mention.mentionees` array off an inbound text message.
- * Entries that do not carry a usable index and length are dropped.
- */
 export const parseInboundMentions = (
   message: LineMessageEvent["message"]
 ): LineMention[] => {
@@ -57,7 +53,6 @@ export const parseInboundMentions = (
   return mentions;
 };
 
-/** LINE substitutes at most 20 mentions in one text message v2. */
 export const MAX_MENTIONS_PER_MESSAGE = 20;
 
 const validateSegment = (
@@ -95,11 +90,6 @@ const validateSegment = (
   }
 };
 
-/**
- * Validates mention segments against the text and returns them sorted by
- * index. Overlapping segments are rejected because LINE cannot render two
- * mentions over the same characters.
- */
 export const normalizeMentionSegments = (
   text: string,
   segments: LineMentionSegment[]

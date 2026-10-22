@@ -15,10 +15,8 @@ import {
   text,
 } from "chat";
 
-/** URL schemes an autolink adds in front of the text it was written as. */
 const AUTOLINK_SCHEMES = ["mailto:", "http://", "https://"] as const;
 
-/** True when a link's text is only its URL, as written or as autolinked. */
 const isBareUrl = (label: string, url: string): boolean =>
   label === url ||
   AUTOLINK_SCHEMES.some((scheme) => url === `${scheme}${label}`);
@@ -29,21 +27,17 @@ const isBareUrl = (label: string, url: string): boolean =>
  * LINE renders no Markdown in either direction. Inbound text is taken
  * literally, and outbound Markdown is flattened to plain text straight from
  * its AST: formatting markers are dropped, while code, link targets, and list
- * markers are kept. Serializing to Markdown and stripping it with patterns,
- * as this class once did, added escapes and rewrote ordinary text.
+ * markers are kept.
  */
 export class LineFormatConverter extends BaseFormatConverter {
-  /** LINE text is plain text, so it becomes one literal paragraph. */
   toAst(platformText: string): Root {
     return root([paragraph([text(platformText)])]);
   }
 
-  /** Renders an AST as the plain text LINE displays. */
   fromAst(ast: Root): string {
     return this.renderBlocks(ast.children);
   }
 
-  /** Renders block nodes a blank line apart, skipping ones that render empty. */
   private renderBlocks(nodes: Content[]): string {
     return nodes
       .map((node) => this.nodeToText(node))

@@ -8,13 +8,11 @@ import type { LineAdapterConfig } from "./types.js";
  *
  * @example
  * ```ts
- * // With explicit config
  * const adapter = createLineAdapter({
  *   channelAccessToken: "eyJhbG...",
  *   channelSecret: "abc123...",
  * });
  *
- * // With environment variables
  * // LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET must be set
  * const adapter = createLineAdapter();
  * ```

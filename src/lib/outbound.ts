@@ -11,20 +11,15 @@ import { buildAudioMessage, buildMediaMessage } from "./media.js";
 import { buildStickerMessage } from "./stickers.js";
 import { buildTextMessage } from "./text-v2.js";
 
-/** LINE accepts at most five message objects per send request. */
 export const MAX_MESSAGES_PER_REQUEST = 5;
 
-/** LINE multicast accepts at most 500 user IDs per request. */
 export const MAX_MULTICAST_RECIPIENTS = 500;
 
-/** LINE multicast accepts one aggregation unit: up to 30 alphanumerics or underscores. */
 const MAX_AGGREGATION_UNITS = 1;
 const AGGREGATION_UNIT_PATTERN = /^[a-zA-Z0-9_]{1,30}$/;
 
-/** LINE user IDs are `U` followed by 32 hex characters. */
 const LINE_USER_ID_PATTERN = /^U[0-9a-f]{32}$/;
 
-/** `X-Line-Retry-Key` must be a hexadecimal UUID. */
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -178,11 +173,6 @@ export const toLineMessages = (
   throw new ValidationError("line", "No message content to send");
 };
 
-/**
- * True when LINE would render a native mention for this message. Emoji use
- * the same `textV2` shape, so the message type alone does not say whether a
- * mention is present.
- */
 export const hasMentionSubstitution = (
   message: messagingApi.Message
 ): boolean =>
@@ -191,13 +181,6 @@ export const hasMentionSubstitution = (
     (entry) => entry.type === "mention"
   );
 
-/**
- * Converts one or more postables for a batch send. Throws when the result
- * exceeds LINE's per-request limit rather than truncating, because a dropped
- * message would silently reach the whole audience incomplete. LINE only
- * substitutes mentions on reply and push messages, so mentions are rejected
- * here too.
- */
 export const toBatchLineMessages = (
   messages: LinePostableMessage | LinePostableMessage[],
   converter: LineFormatConverter

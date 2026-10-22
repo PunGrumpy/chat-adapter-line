@@ -79,10 +79,8 @@ vi.mock("@line/bot-sdk", () => {
   };
 });
 
-// Mock chat - factory is self-contained
 vi.mock("chat", async (importOriginal) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const actual = await (importOriginal as any)();
+  const actual = await importOriginal<Record<string, unknown>>();
 
   const MockConsoleLogger = class ConsoleLogger {
     debug = vi.fn();

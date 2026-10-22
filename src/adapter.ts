@@ -411,6 +411,11 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
    * unregisters this one. A handler that throws or rejects is logged and
    * does not stop the others or change the webhook response.
    *
+   * Unlike message events, redelivered and standby-mode events are
+   * delivered too, because a missed `unfollow` cannot be recovered the way
+   * a missed message can be resent. Filter on `isRedelivery` and `mode`,
+   * and deduplicate on `webhookEventId`.
+   *
    * @example
    * ```ts
    * const stop = adapter.onLifecycleEvent((event) => {
@@ -427,20 +432,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     };
   }
 
-  /**
-   * Hands one lifecycle event to every registered handler. Each handler's
-   * work goes to the webhook's `waitUntil`, when the caller passed one.
-   *
-   * Unlike message events, a redelivered or standby-mode lifecycle event is
-   * still delivered, because a missed `unfollow` cannot be recovered the way
-   * a missed message can be resent. Both facts ride on the event, so a
-   * handler can filter on `isRedelivery` and `mode`, and deduplicate on
-   * `webhookEventId`.
-   *
-   * LINE issues a reply token with `follow`, `join`, and `memberJoined`, so
-   * those are stored for the reply-first path whether or not anything is
-   * listening. Welcoming a new follower then costs no message quota.
-   */
   private dispatchLifecycleEvent(
     event: LineLifecycleRawEvent,
     channelId: string,
@@ -462,16 +453,11 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     }
 
     for (const handler of this.lifecycleHandlers) {
-      // Deliberately not awaited: LINE expects the webhook to be
-      // acknowledged promptly, so a slow handler must not hold up the 200.
-      // waitUntil keeps a serverless runtime alive until the handler
-      // settles, as the Chat SDK does for message and action handlers.
       const task = this.runLifecycleHandler(handler, lifecycle);
       options?.waitUntil?.(task);
     }
   }
 
-  /** Runs one handler, swallowing its failure so the others still run. */
   private async runLifecycleHandler(
     handler: LineLifecycleHandler,
     event: LineLifecycleEvent

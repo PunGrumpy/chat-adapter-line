@@ -1,4 +1,4 @@
-/* eslint-disable max-classes-per-file, class-methods-use-this */
+/* eslint-disable class-methods-use-this */
 import crypto from "node:crypto";
 
 import {
@@ -96,8 +96,7 @@ const verifySignature = (
   );
   const received = Buffer.from(signature);
 
-  // timingSafeEqual throws on inputs of different byte lengths, and a header
-  // of the wrong length is a wrong signature.
+  // timingSafeEqual throws on inputs of different byte lengths.
   if (received.length !== expected.length) {
     return false;
   }
@@ -167,7 +166,6 @@ const isReplyTokenError = (error: unknown): boolean =>
   error.status === 400 &&
   parseLineErrorMessage(error.body) === "Invalid reply token";
 
-/** Converts a LINE 429 to the Chat SDK's rate-limit error. */
 const toRateLimitError = (
   error: unknown
 ): AdapterRateLimitError | undefined => {
@@ -214,7 +212,6 @@ const extractStreamText = (chunk: string | StreamChunk): string => {
   return "";
 };
 
-/** Reads a stream to its end and joins its text. */
 const readStreamText = async (
   textStream: AsyncIterable<string | StreamChunk>
 ): Promise<string> => {
@@ -230,11 +227,6 @@ const readRequestId = (response: {
 }): string | undefined =>
   response.httpResponse.headers.get("x-line-request-id") ?? undefined;
 
-/**
- * Reads one credential, refusing a blank one. An empty channel secret is a
- * valid HMAC key that anyone can sign webhooks with, so it must never reach
- * the signature check.
- */
 const requireCredential = (
   value: unknown,
   name: "channelAccessToken" | "channelSecret"
@@ -292,9 +284,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     } catch (error) {
       // Never throw here: the Chat SDK keeps a failed initialization and
       // replays it to every later webhook, for every adapter, until the
-      // process restarts. Never guess either, because the channel ID is part
-      // of every thread ID. Each webhook names the bot in `destination`, so
-      // the first one supplies it.
+      // process restarts.
       this.logger.warn(
         "Failed to fetch bot info; the channel ID will come from the first webhook",
         { error }
@@ -309,16 +299,13 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
   /**
    * A LINE conversation has no threads inside it, so each 1:1 chat, group,
-   * or room is its own Chat SDK channel, named by its thread ID. The bot ID
-   * would put every conversation in one channel, sharing its state and
-   * locks, and `thread.channel.post()` could not tell where to send.
+   * or room is its own Chat SDK channel, named by its thread ID.
    */
   channelIdFromThreadId(threadId: string): string {
     const { channelId, sourceId, sourceType } = decodeThreadId(threadId);
     return encodeThreadId(sourceType, channelId, sourceId);
   }
 
-  /** A LINE thread is a DM when its source is a single user. */
   isDM(threadId: string): boolean {
     return isDMThreadId(threadId);
   }
@@ -359,9 +346,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return new Response("OK", { status: 200 });
     }
 
-    // `destination` is the bot's own user ID, the value getBotInfo returns.
-    // When initialization could not fetch it, the first verified webhook
-    // supplies it, so thread IDs never depend on that call succeeding.
     if (this.channelId === null && isNonEmptyString(payload.destination)) {
       this.channelId = payload.destination;
     }
@@ -503,17 +487,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     }
   }
 
-  /**
-   * Dispatches a LINE postback event to the Chat SDK's action handlers
-   * (`chat.onAction`). Button clicks arrive as postback webhooks, so this
-   * is the only path by which flex message buttons become ActionEvents.
-   *
-   * Card buttons encode their ID and value as `id=…&v=…`. Any other data,
-   * from a hand-built Flex action, a rich menu, or a quick reply, becomes
-   * the action ID as it is. A date or time picker's choice becomes the
-   * value, ahead of an encoded `v`, because the choice is what the user
-   * answered.
-   */
   private processPostbackEvent(
     event: LinePostbackEvent,
     threadId: string,
@@ -746,12 +719,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     };
   }
 
-  /**
-   * Sends messages via the free Reply API when a fresh webhook reply token is
-   * available for the thread. Uses the quota-metered Push API otherwise:
-   * proactive sends, late replies, tokens already consumed, or a reply
-   * rejected because the token expired or was used.
-   */
   private async sendMessages(
     threadId: string,
     sourceId: string,
@@ -794,7 +761,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     }
   }
 
-  /** Push with LINE 429s mapped to the Chat SDK's rate-limit error. */
   private pushMessages(
     sourceId: string,
     messages: messagingApi.Message[]
@@ -835,8 +801,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     const markdown = await this.collectStream(threadId, textStream);
 
-    // The Chat SDK records a streamed reply as Markdown, so render it
-    // exactly like a `markdown` postable.
     const text = this.converter.fromMarkdown(markdown);
     const messages = splitText(text, MAX_TEXT_LENGTH).map((part) =>
       buildTextMessage(part)
@@ -861,8 +825,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       first ??= result;
     }
 
-    // Report the first message: it opens the reply, and its quote token is
-    // the one a later message would quote.
     return this.buildRawMessage(first ?? {}, text, threadId);
   }
 

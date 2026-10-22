@@ -181,8 +181,7 @@ const toRateLimitError = (
   );
 };
 
-/** LINE's webhook URL verification probes use a dummy token. */
-const DUMMY_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
+const VERIFICATION_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
 
 /**
  * How long LINE shows the loading animation, in seconds. LINE accepts
@@ -383,7 +382,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       if (event.deliveryContext?.isRedelivery) {
         continue;
       }
-      if (DUMMY_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
+      if (VERIFICATION_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
         continue;
       }
 
@@ -469,7 +468,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     if (
       lifecycle.replyToken !== undefined &&
-      !DUMMY_REPLY_TOKEN_PATTERN.test(lifecycle.replyToken)
+      !VERIFICATION_REPLY_TOKEN_PATTERN.test(lifecycle.replyToken)
     ) {
       this.replyTokens.set(threadId, lifecycle.replyToken);
     }

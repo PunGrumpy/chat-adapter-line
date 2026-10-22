@@ -24,18 +24,7 @@ import { LineAdapter, LineFormatConverter } from "../src/adapter.js";
 import { LineMessage } from "../src/message.js";
 import type { LineMessageEvent, LinePostbackEvent } from "../src/types.js";
 
-// Mock @line/bot-sdk - factory is self-contained
-vi.mock("@line/bot-sdk", () => {
-  const pushMessage = vi.fn();
-  const replyMessage = vi.fn();
-  const getBotInfo = vi.fn();
-  const getProfile = vi.fn();
-  const getGroupSummary = vi.fn();
-  const showLoadingAnimation = vi.fn();
-  const getMessageContent = vi.fn();
-  const broadcastWithHttpInfo = vi.fn();
-  const multicastWithHttpInfo = vi.fn();
-
+const mocks = vi.hoisted(() => {
   class HTTPFetchError extends Error {
     status: number;
     body: string;
@@ -55,35 +44,39 @@ vi.mock("@line/bot-sdk", () => {
     }
   }
 
+  return {
+    HTTPFetchError,
+    broadcastWithHttpInfo: vi.fn(),
+    getBotInfo: vi.fn(),
+    getGroupSummary: vi.fn(),
+    getMessageContent: vi.fn(),
+    getProfile: vi.fn(),
+    multicastWithHttpInfo: vi.fn(),
+    pushMessage: vi.fn(),
+    replyMessage: vi.fn(),
+    showLoadingAnimation: vi.fn(),
+  };
+});
+
+vi.mock("@line/bot-sdk", () => {
   class MockLineBotClient {
-    broadcastWithHttpInfo = broadcastWithHttpInfo;
-    getBotInfo = getBotInfo;
-    getGroupSummary = getGroupSummary;
-    getMessageContent = getMessageContent;
-    getProfile = getProfile;
-    multicastWithHttpInfo = multicastWithHttpInfo;
-    pushMessage = pushMessage;
-    replyMessage = replyMessage;
-    showLoadingAnimation = showLoadingAnimation;
+    broadcastWithHttpInfo = mocks.broadcastWithHttpInfo;
+    getBotInfo = mocks.getBotInfo;
+    getGroupSummary = mocks.getGroupSummary;
+    getMessageContent = mocks.getMessageContent;
+    getProfile = mocks.getProfile;
+    multicastWithHttpInfo = mocks.multicastWithHttpInfo;
+    pushMessage = mocks.pushMessage;
+    replyMessage = mocks.replyMessage;
+    showLoadingAnimation = mocks.showLoadingAnimation;
 
     static fromChannelAccessToken = vi.fn(() => new MockLineBotClient());
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (globalThis as any).__lineMocks = {
-    HTTPFetchError,
-    broadcastWithHttpInfo,
-    getBotInfo,
-    getGroupSummary,
-    getMessageContent,
-    getProfile,
-    multicastWithHttpInfo,
-    pushMessage,
-    replyMessage,
-    showLoadingAnimation,
+  return {
+    HTTPFetchError: mocks.HTTPFetchError,
+    LineBotClient: MockLineBotClient,
   };
-
-  return { HTTPFetchError, LineBotClient: MockLineBotClient };
 });
 
 // Mock chat - factory is self-contained
@@ -128,24 +121,6 @@ vi.mock("chat", async (importOriginal) => {
     Message: MockMessage,
   };
 });
-
-interface Mocks {
-  broadcastWithHttpInfo: Mock;
-  multicastWithHttpInfo: Mock;
-  pushMessage: Mock;
-  replyMessage: Mock;
-  getBotInfo: Mock;
-  getProfile: Mock;
-  getGroupSummary: Mock;
-  showLoadingAnimation: Mock;
-  getMessageContent: Mock;
-}
-
-const getMocks = (): Mocks => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const g = globalThis as any;
-  return { ...g.__lineMocks };
-};
 
 const validConfig = {
   channelAccessToken: "test-token",
@@ -254,30 +229,20 @@ const createNonTextChunk = async function* createNonTextChunkGen<T>(
   yield chunk;
 };
 
-const makeReplyTokenError = (): Error => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { HTTPFetchError } = (globalThis as any).__lineMocks;
-  return new HTTPFetchError(
+const makeReplyTokenError = (): Error =>
+  new mocks.HTTPFetchError(
     "400 - Bad Request",
     400,
     JSON.stringify({ message: "Invalid reply token" })
-  ) as Error;
-};
+  );
 
 const makeRateLimitError = (retryAfterSeconds?: number): Error => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { HTTPFetchError } = (globalThis as any).__lineMocks;
   const headers = new Headers(
     retryAfterSeconds === undefined
       ? undefined
       : { "retry-after": String(retryAfterSeconds) }
   );
-  return new HTTPFetchError(
-    "429 - Too Many Requests",
-    429,
-    "",
-    headers
-  ) as Error;
+  return new mocks.HTTPFetchError("429 - Too Many Requests", 429, "", headers);
 };
 
 /** Mimics the LINE SDK's `*WithHttpInfo` response for an accepted batch send. */
@@ -340,10 +305,8 @@ describe("LineFormatConverter", () => {
 
 describe("LineAdapter", () => {
   let adapter: LineAdapter;
-  let mocks: Mocks;
 
   beforeEach(() => {
-    mocks = getMocks();
     vi.clearAllMocks();
     mocks.getBotInfo.mockResolvedValue({ userId: "bot-123" });
     adapter = new LineAdapter(validConfig);
@@ -2012,10 +1975,8 @@ describe("LineAdapter", () => {
 
     it("does not retry push when a 400 has another error message", async () => {
       await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { HTTPFetchError } = (globalThis as any).__lineMocks;
       mocks.replyMessage.mockRejectedValueOnce(
-        new HTTPFetchError(
+        new mocks.HTTPFetchError(
           "400 - Bad Request",
           400,
           JSON.stringify({ message: "The request body has 2 error(s)" })

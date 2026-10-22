@@ -20,7 +20,6 @@ vi.mock("@line/bot-sdk", () => ({
   },
 }));
 
-/** The status a webhook signed with `secret` gets from `adapter`. */
 const webhookStatus = async (
   adapter: LineAdapter,
   secret: string
@@ -47,8 +46,6 @@ const createAdapterWithEmptySecret = () =>
   });
 
 describe("createLineAdapter", () => {
-  // Credentials exported in the shell running the tests must not leak in.
-  // The factory treats an empty variable as unset.
   beforeEach(() => {
     vi.stubEnv("LINE_CHANNEL_ACCESS_TOKEN", "");
     vi.stubEnv("LINE_CHANNEL_SECRET", "");

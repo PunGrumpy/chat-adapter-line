@@ -1487,8 +1487,7 @@ describe("LineAdapter", () => {
       expect(adapter.parseMessage(makeEvent()).emojis).toEqual([]);
     });
 
-    /** The message kinds LINE issues a quote token for. */
-    const quotable = [
+    const kindsWithQuoteToken = [
       ["text", { id: "msg-1", text: "hello", type: "text" }],
       ["image", { id: "img-1", type: "image" }],
       ["video", { id: "vid-1", type: "video" }],
@@ -1498,7 +1497,7 @@ describe("LineAdapter", () => {
       ],
     ] as const;
 
-    it.each(quotable)(
+    it.each(kindsWithQuoteToken)(
       "exposes the quoted message ID on a %s message",
       (_label, message) => {
         const event = makeEvent({
@@ -1515,7 +1514,7 @@ describe("LineAdapter", () => {
       }
     );
 
-    it.each(quotable)(
+    it.each(kindsWithQuoteToken)(
       "leaves it unset on an unquoted %s message",
       (_label, message) => {
         const event = makeEvent({

@@ -67,12 +67,10 @@ const rejectQuote = (options: LineTextOptions, kind: string): void => {
   }
 };
 
-/**
- * Mentions and emoji are positioned by character offset, so they only ride
- * on text the adapter sends verbatim. Anything rendered or rebuilt on the
- * way out rejects them instead of shifting them onto the wrong characters.
- */
-const rejectSubstitutions = (options: LineTextOptions, kind: string): void => {
+const rejectMentionsAndEmoji = (
+  options: LineTextOptions,
+  kind: string
+): void => {
   if (options.mentions !== undefined && options.mentions.length > 0) {
     throw new ValidationError(
       "line",
@@ -113,43 +111,43 @@ export const toLineMessages = (
 
   if ("flex" in message) {
     rejectQuote(options, "flex");
-    rejectSubstitutions(options, "flex");
+    rejectMentionsAndEmoji(options, "flex");
     return [buildNativeFlexMessage(message.flex)];
   }
 
   const card = extractCard(message as AdapterPostableMessage);
   if (card) {
     rejectQuote(options, "card");
-    rejectSubstitutions(options, "card");
+    rejectMentionsAndEmoji(options, "card");
     return [buildFlexMessage(card)];
   }
 
   if ("audio" in message) {
     rejectQuote(options, "audio");
-    rejectSubstitutions(options, "audio");
+    rejectMentionsAndEmoji(options, "audio");
     return [buildAudioMessage(message.audio)];
   }
 
   if ("image" in message) {
     rejectQuote(options, "image");
-    rejectSubstitutions(options, "image");
+    rejectMentionsAndEmoji(options, "image");
     return [buildMediaMessage(message.image, "image")];
   }
 
   if ("video" in message) {
     rejectQuote(options, "video");
-    rejectSubstitutions(options, "video");
+    rejectMentionsAndEmoji(options, "video");
     return [buildMediaMessage(message.video, "video")];
   }
 
   if ("location" in message) {
     rejectQuote(options, "location");
-    rejectSubstitutions(options, "location");
+    rejectMentionsAndEmoji(options, "location");
     return [buildLocationMessage(message.location)];
   }
 
   if ("sticker" in message) {
-    rejectSubstitutions(options, "sticker");
+    rejectMentionsAndEmoji(options, "sticker");
     return [buildStickerMessage(message.sticker, options)];
   }
 
@@ -162,7 +160,7 @@ export const toLineMessages = (
   }
 
   if (typeof message.markdown === "string") {
-    rejectSubstitutions(options, "markdown");
+    rejectMentionsAndEmoji(options, "markdown");
     const rendered = converter.renderPostable(
       message as AdapterPostableMessage
     );
@@ -170,7 +168,7 @@ export const toLineMessages = (
   }
 
   if (message.ast) {
-    rejectSubstitutions(options, "ast");
+    rejectMentionsAndEmoji(options, "ast");
     const rendered = converter.fromAst(message.ast as Root);
     return [buildTextMessage(rendered, options)];
   }

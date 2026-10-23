@@ -9,6 +9,7 @@ import {
 } from "../../src/lib/text-v2.js";
 
 const PRODUCT_ID = "5ac1bfd5040ab15980c9b435";
+const ENCODED_EMOJI = "{emoji0}";
 
 describe("buildTextMessage", () => {
   it("builds a plain text message without options", () => {
@@ -315,9 +316,7 @@ describe("buildTextMessage", () => {
   });
 
   it("measures a textV2 after encoding, where a placeholder grows the text", () => {
-    // 4993 letters plus one "$" is 4994 characters, under the limit as
-    // written, but "$" becomes "{emoji0}" and the sent text is 5001.
-    const text = `${"a".repeat(MAX_TEXT_LENGTH - 7)}$`;
+    const text = `${"a".repeat(MAX_TEXT_LENGTH - ENCODED_EMOJI.length + 1)}$`;
 
     expect(() =>
       buildTextMessage(text, {
@@ -329,8 +328,7 @@ describe("buildTextMessage", () => {
   });
 
   it("accepts a textV2 that lands exactly on the limit after encoding", () => {
-    // 4992 letters plus "$" becomes 4992 letters plus "{emoji0}": 5000.
-    const text = `${"a".repeat(MAX_TEXT_LENGTH - 8)}$`;
+    const text = `${"a".repeat(MAX_TEXT_LENGTH - ENCODED_EMOJI.length)}$`;
 
     expect(
       buildTextMessage(text, {
@@ -342,8 +340,7 @@ describe("buildTextMessage", () => {
   });
 
   it("counts escaped braces toward the limit", () => {
-    // Each "{" doubles on the wire, so 2500 of them plus an emoji overflow.
-    const text = `${"{".repeat(2500)}$`;
+    const text = `${"{".repeat(MAX_TEXT_LENGTH / 2)}$`;
 
     expect(() =>
       buildTextMessage(text, {

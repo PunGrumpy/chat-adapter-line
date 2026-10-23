@@ -9,7 +9,6 @@ import type {
 import { isNonEmptyString, isNonNegativeInteger } from "./guards.js";
 import { isRecord } from "./is-record.js";
 
-/** LINE caps media URLs at 2000 characters. */
 const MAX_CONTENT_URL_LENGTH = 2000;
 
 const isPositiveInteger = (value: unknown): value is number =>
@@ -23,10 +22,6 @@ const isHttpsUrl = (value: string): boolean => {
   }
 };
 
-/**
- * Reads one media URL. LINE fetches the file itself rather than taking bytes
- * from the bot, so the URL has to be HTTPS and reachable from the internet.
- */
 const readContentUrl = (value: unknown, field: string): string => {
   if (typeof value !== "string" || !isHttpsUrl(value)) {
     throw new ValidationError("line", `${field} must be an HTTPS URL`);
@@ -97,7 +92,6 @@ export const buildMediaMessage = (
   };
 };
 
-/** The inbound message types LINE serves downloadable content for. */
 const MEDIA_KINDS: ReadonlySet<string> = new Set([
   "image",
   "video",

@@ -4,13 +4,9 @@ import type { ButtonElement, CardElement } from "chat";
 
 import { isRecord } from "./is-record.js";
 
-/** LINE caps postback `data` at 300 characters. */
 const MAX_POSTBACK_DATA_LENGTH = 300;
-/** LINE caps button labels at 20 characters. */
 const MAX_BUTTON_LABEL_LENGTH = 20;
-/** LINE caps display text on postback actions at 300 characters. */
 const MAX_ACTION_DISPLAY_TEXT_LENGTH = 300;
-/** LINE caps Flex Message `altText` at 400 characters. */
 const MAX_ALT_TEXT_LENGTH = 400;
 
 /**
@@ -139,6 +135,9 @@ const buildFooterContents = (card: CardElement): messagingApi.FlexButton[] => {
  *
  * The card title, text, and section children become the bubble body;
  * buttons inside actions become the bubble footer as postback actions.
+ * Other elements, and buttons without an ID, are left out. A card with no
+ * body gets the text "Empty Card", and a card with no title gets
+ * "Flex Message" as its notification text.
  */
 export const buildFlexMessage = (
   card: CardElement

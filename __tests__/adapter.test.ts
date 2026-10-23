@@ -175,7 +175,6 @@ const makeRequest = (body: string, signature?: string | null): Request =>
     method: "POST",
   });
 
-// Reusable async generators for stream tests
 const helloWorldChunks = async function* helloWorldChunks() {
   yield "Hello ";
   yield "world";
@@ -198,7 +197,6 @@ const createRepeatedChunks = async function* createRepeatedChunksGen(
   }
 };
 
-// Yields "Hello", then waits for `gate` to emit "release" before " world".
 const gatedChunks = async function* gatedChunksGen(
   gate: EventTarget
 ): AsyncGenerator<string> {
@@ -243,7 +241,6 @@ const makeRateLimitError = (retryAfterSeconds?: number): Error => {
   return new mocks.HTTPFetchError("429 - Too Many Requests", 429, "", headers);
 };
 
-/** Mimics the LINE SDK's `*WithHttpInfo` response for an accepted batch send. */
 const acceptedResponse = (requestId?: string) => ({
   body: {},
   httpResponse: new Response(null, {
@@ -252,7 +249,6 @@ const acceptedResponse = (requestId?: string) => ({
   }),
 });
 
-/** Delivers a webhook event to seed the reply-token store for a thread. */
 const seedReplyToken = async (
   adapter: LineAdapter,
   overrides: Partial<LineMessageEvent> = {}
@@ -1219,8 +1215,6 @@ describe("LineAdapter", () => {
       await deliverWith({ waitUntil }, makeLifecycleEvent());
       const [[task]] = waitUntil.mock.calls;
 
-      // The webhook has answered, but the handler is still waiting on its
-      // timer; only the task handed to waitUntil sees it through.
       expect(finished).toBe(false);
       await task;
       expect(finished).toBe(true);
@@ -2151,8 +2145,6 @@ describe("LineAdapter", () => {
       });
     });
 
-    // A test that fails before its stream reads the queued responses must
-    // not leave them for the tests that follow.
     afterEach(() => {
       mocks.showLoadingAnimation.mockReset();
     });

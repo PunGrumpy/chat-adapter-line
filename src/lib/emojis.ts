@@ -91,12 +91,6 @@ const validateSegment = (segment: LineEmojiSegment, text: string): void => {
   }
 };
 
-/**
- * Validates emoji segments against the text and returns them sorted by index.
- *
- * Each emoji replaces exactly one `$`, so a segment carries no length of its
- * own and two emoji at the same index collide, which the encoder rejects.
- */
 export const normalizeEmojiSegments = (
   text: string,
   segments: LineEmojiSegment[]

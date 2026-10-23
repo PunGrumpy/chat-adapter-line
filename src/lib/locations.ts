@@ -4,13 +4,10 @@ import type { messagingApi } from "@line/bot-sdk";
 import type { LineLocation, LineMessageEvent } from "../types.js";
 import { isRecord } from "./is-record.js";
 
-/** LINE caps a location title and address at 100 characters each. */
 const MAX_LOCATION_TEXT_LENGTH = 100;
 
-/** Latitude runs from the south pole to the north pole. */
 const MAX_LATITUDE = 90;
 
-/** Longitude runs from the antimeridian west to the antimeridian east. */
 const MAX_LONGITUDE = 180;
 
 const isCoordinate = (value: unknown, limit: number): value is number =>

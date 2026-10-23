@@ -5,7 +5,6 @@ import type { LineTextOptions } from "../types.js";
 import { EMOJI_PLACEHOLDER, normalizeEmojiSegments } from "./emojis.js";
 import { normalizeMentionSegments, toMentionee } from "./mentions.js";
 
-/** LINE accepts at most 100 substitution objects in one text message v2. */
 export const MAX_SUBSTITUTIONS_PER_MESSAGE = 100;
 
 /**
@@ -27,7 +26,6 @@ const checkTextLength = (text: string): void => {
 const escapePlaceholders = (text: string): string =>
   text.replaceAll("{", "{{").replaceAll("}", "}}");
 
-/** One span of the text that LINE replaces with a mention or an emoji. */
 interface Placeholder {
   index: number;
   length: number;
@@ -120,8 +118,6 @@ export const buildTextMessage = (
 
   encoded += escapePlaceholders(text.slice(cursor));
 
-  // The limit applies to what is sent, and placeholders and escaped braces
-  // change the length, so the encoded text is what gets measured.
   checkTextLength(encoded);
 
   return { substitution, text: encoded, type: "textV2", ...quote };

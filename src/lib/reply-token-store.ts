@@ -4,10 +4,10 @@
  * accepts each token once.
  */
 
-/** LINE rejects reply tokens within a minute. Keep a safety margin. */
-const TOKEN_TTL_MS = 55_000;
+const REPLY_TOKEN_LIFETIME_MS = 60_000;
+const EXPIRY_MARGIN_MS = 5000;
+const TOKEN_TTL_MS = REPLY_TOKEN_LIFETIME_MS - EXPIRY_MARGIN_MS;
 
-/** Upper bound on stored threads. */
 const MAX_STORED_TOKENS = 500;
 
 interface Entry {

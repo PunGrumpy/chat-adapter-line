@@ -139,11 +139,6 @@ const getMimeType = (kind: LineMediaMetadata["kind"]): string => {
   return "application/octet-stream";
 };
 
-/**
- * LINE reports an expired or already used reply token as HTTP 400. Only that
- * case falls back to push, because a 400 caused by the request payload did
- * not consume the reply token and may have already sent messages.
- */
 const parseLineErrorMessage = (body: string): string | undefined => {
   try {
     const parsed: unknown = JSON.parse(body);
@@ -162,10 +157,12 @@ const parseLineErrorMessage = (body: string): string | undefined => {
   return undefined;
 };
 
-const isReplyTokenError = (error: unknown): boolean =>
+const INVALID_REPLY_TOKEN_MESSAGE = "Invalid reply token";
+
+const isInvalidReplyTokenError = (error: unknown): boolean =>
   error instanceof HTTPFetchError &&
   error.status === 400 &&
-  parseLineErrorMessage(error.body) === "Invalid reply token";
+  parseLineErrorMessage(error.body) === INVALID_REPLY_TOKEN_MESSAGE;
 
 /** Converts a LINE 429 to the Chat SDK's rate-limit error. */
 const toRateLimitError = (
@@ -184,8 +181,7 @@ const toRateLimitError = (
   );
 };
 
-/** LINE's webhook URL verification probes use a dummy token. */
-const DUMMY_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
+const VERIFICATION_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
 
 /**
  * How long LINE shows the loading animation, in seconds. LINE accepts
@@ -386,7 +382,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       if (event.deliveryContext?.isRedelivery) {
         continue;
       }
-      if (DUMMY_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
+      if (VERIFICATION_REPLY_TOKEN_PATTERN.test(event.replyToken)) {
         continue;
       }
 
@@ -472,7 +468,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     if (
       lifecycle.replyToken !== undefined &&
-      !DUMMY_REPLY_TOKEN_PATTERN.test(lifecycle.replyToken)
+      !VERIFICATION_REPLY_TOKEN_PATTERN.test(lifecycle.replyToken)
     ) {
       this.replyTokens.set(threadId, lifecycle.replyToken);
     }
@@ -781,7 +777,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         throw rateLimit;
       }
 
-      if (!isReplyTokenError(error)) {
+      if (!isInvalidReplyTokenError(error)) {
         throw error;
       }
 

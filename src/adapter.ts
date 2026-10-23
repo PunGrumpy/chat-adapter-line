@@ -184,20 +184,13 @@ const toRateLimitError = (
 const VERIFICATION_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
 
 /**
- * How long LINE shows the loading animation, in seconds. LINE accepts
- * multiples of 5 up to 60 and hides the animation as soon as the bot's next
- * message arrives.
+ * LINE accepts multiples of 5 up to 60, and hides the animation early when
+ * the bot's next message arrives.
  */
 const LOADING_ANIMATION_SECONDS = 20;
 
-/** Skips repeat requests while the last animation is still showing. */
 const LOADING_ANIMATION_COOLDOWN_MS = 15_000;
 
-/**
- * How often a stream that is still being read checks whether the loading
- * animation needs renewing. A check is a map lookup. It requests a new
- * animation once the cooldown has passed, before the last one runs out.
- */
 const LOADING_ANIMATION_CHECK_MS = 1000;
 
 const extractStreamText = (chunk: string | StreamChunk): string => {
@@ -259,7 +252,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     string,
     { info: ThreadInfo; expires: number }
   >();
-  private lastTypingTime = new Map<string, number>();
+  private loadingAnimationShownAt = new Map<string, number>();
   private replyTokens = new ReplyTokenStore();
   private lifecycleHandlers = new Set<LineLifecycleHandler>();
 
@@ -753,9 +746,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     sourceId: string,
     messages: messagingApi.Message[]
   ): Promise<SendResult> {
-    // LINE hides the loading animation once a message arrives, so the next
-    // startTyping() has to ask for it again.
-    this.lastTypingTime.delete(threadId);
+    this.loadingAnimationShownAt.delete(threadId);
 
     const replyToken = this.replyTokens.take(threadId);
 
@@ -862,13 +853,6 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     return this.buildRawMessage(first ?? {}, text, threadId);
   }
 
-  /**
-   * Reads a stream to its end while LINE's loading animation shows in a 1:1
-   * chat. The animation lasts LOADING_ANIMATION_SECONDS, often less than a
-   * generation takes, so it is renewed until the stream ends. The renewal in
-   * flight is awaited before returning, so it cannot reach LINE after the
-   * reply and show the animation again.
-   */
   private async collectStream(
     threadId: string,
     textStream: AsyncIterable<string | StreamChunk>
@@ -886,6 +870,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return await readStreamText(textStream);
     } finally {
       clearInterval(timer);
+      // A renewal reaching LINE after the reply would bring the animation back.
       await renewal;
     }
   }
@@ -1075,8 +1060,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return;
     }
 
-    const last = this.lastTypingTime.get(threadId);
-    if (last && Date.now() - last < LOADING_ANIMATION_COOLDOWN_MS) {
+    const shownAt = this.loadingAnimationShownAt.get(threadId);
+    if (shownAt && Date.now() - shownAt < LOADING_ANIMATION_COOLDOWN_MS) {
       return;
     }
 
@@ -1087,7 +1072,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         chatId: sourceId,
         loadingSeconds: LOADING_ANIMATION_SECONDS,
       });
-      this.lastTypingTime.set(threadId, Date.now());
+      this.loadingAnimationShownAt.set(threadId, Date.now());
     } catch (error) {
       this.logger.debug("Failed to show the loading animation", {
         error,

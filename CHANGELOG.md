@@ -1,5 +1,14 @@
 # chat-adapter-line
 
+## 0.1.7
+
+### Patch Changes
+
+- ea77ff6: Make each LINE conversation its own Chat SDK channel. `channelIdFromThreadId()` returned the bot's user ID, so every 1:1 chat, group, and room of a bot was one channel. They shared `thread.channel.state` and channel-scoped locks, and `thread.channel.post()` threw "Invalid LINE thread ID". The channel ID is now the conversation's thread ID, so `thread.channel.post()` sends to that conversation, and `fetchThread()` reports the same `channelId`. State saved with `thread.channel.setState()` before this release was shared by every conversation and is no longer read. Per-thread state and subscriptions are unchanged.
+- 64366f8: Require `chat` 4.17.0 or a later 4.x release. The peer range allowed every 4.x release, but the adapter imports `isTableNode` and `tableToAscii`, which `chat` first exports in 4.16.0, so the package failed to load on anything older. It also relies on `BaseFormatConverter.renderList()` and the `StreamChunk` type from 4.17.0, so on 4.16 rendering a Markdown list threw. CI now runs the tests against `chat` 4.17.0 as well as the locked version.
+- 9c28389: Deliver every LINE postback to `onAction`. A postback whose data was not in the adapter's `id=…&v=…` form, such as one from a hand-built Flex action, a rich menu, or a quick reply, was dropped with only a debug log. It now arrives with its data as `actionId`. A datetime picker's choice, which LINE sends in `postback.params`, now arrives as `value` instead of only in `raw`, ahead of any encoded value. Card buttons are unchanged. A catch-all `bot.onAction(handler)` now also receives these postbacks.
+- ba9e7d9: Keep LINE's loading animation up while a streamed reply is collected. `stream()` sends nothing until the stream ends, and LINE hides the animation after 20 seconds, so a reply that took longer to generate left a 1:1 chat looking idle. `stream()` now shows the animation when it starts reading and renews it every 15 seconds until the stream ends. It waits for a renewal still in flight before sending, so the animation never reappears after the reply. Groups and rooms are unchanged, because LINE shows no animation there.
+
 ## 0.1.6
 
 ### Patch Changes

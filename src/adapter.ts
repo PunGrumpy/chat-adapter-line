@@ -227,6 +227,7 @@ const readRequestId = (response: {
 }): string | undefined =>
   response.httpResponse.headers.get("x-line-request-id") ?? undefined;
 
+// An empty channel secret is a valid HMAC key, so anyone could sign webhooks.
 const requireCredential = (
   value: unknown,
   name: "channelAccessToken" | "channelSecret"

@@ -1,5 +1,6 @@
 import { ValidationError } from "@chat-adapter/shared";
 import type { CardElement } from "chat";
+import { emoji } from "chat";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -92,6 +93,67 @@ describe("Flex Messages Utility", () => {
         (contents.footer.contents[0] as { action: { data: string } }).action
           .data
       ).toBe("id=btn-1&v=val-1");
+    });
+
+    it("renders the Chat SDK's emoji placeholders as Unicode emoji", () => {
+      const card: CardElement = {
+        children: [
+          { content: `${emoji.fire} on fire`, type: "text" },
+          {
+            children: [{ content: `${emoji.eyes} details`, type: "text" }],
+            type: "section",
+          },
+          {
+            children: [
+              {
+                id: "btn-1",
+                label: `${emoji.thumbs_up} Approve`,
+                type: "button",
+              },
+            ],
+            type: "actions",
+          },
+        ],
+        title: `${emoji.wave} Welcome`,
+        type: "card",
+      };
+
+      const flexMessage = buildFlexMessage(card);
+      const contents = flexMessage.contents as unknown as {
+        body: { contents: { text: string }[] };
+        footer: {
+          contents: { action: { displayText: string; label: string } }[];
+        };
+      };
+
+      expect(flexMessage.altText).toBe("👋 Welcome");
+      expect(contents.body.contents.map((item) => item.text)).toEqual([
+        "👋 Welcome",
+        "🔥 on fire",
+        "👀 details",
+      ]);
+      expect(contents.footer.contents[0]?.action).toMatchObject({
+        displayText: "👍 Approve",
+        label: "👍 Approve",
+      });
+    });
+
+    it("leaves a caller-built Flex payload's placeholders alone", () => {
+      const flex = {
+        altText: `${emoji.wave} hi`,
+        contents: {
+          body: {
+            contents: [{ text: `${emoji.wave} hi`, type: "text" }],
+            layout: "vertical",
+            type: "box",
+          },
+          type: "bubble",
+        },
+      };
+
+      expect(buildNativeFlexMessage(flex)).toMatchObject({
+        altText: "{{emoji:wave}} hi",
+      });
     });
   });
   describe("buildNativeFlexMessage", () => {

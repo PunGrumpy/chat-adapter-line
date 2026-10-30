@@ -243,7 +243,7 @@ export interface LineLifecycleEvent {
   sourceId: string;
   userId?: string;
   timestamp: Date;
-  /** LINE's unique ID for this delivery. Deduplicate on it. */
+  /** LINE's ID for this event, unchanged when LINE redelivers it. Deduplicate on it. */
   webhookEventId: string;
   mode: "active" | "standby";
   isRedelivery: boolean;

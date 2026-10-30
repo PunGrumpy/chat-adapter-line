@@ -4,7 +4,6 @@ import crypto from "node:crypto";
 import {
   AdapterError,
   AdapterRateLimitError,
-  extractFiles,
   PermissionError,
   ValidationError,
 } from "@chat-adapter/shared";
@@ -12,7 +11,6 @@ import { HTTPFetchError, LineBotClient } from "@line/bot-sdk";
 import type { messagingApi } from "@line/bot-sdk";
 import type {
   Adapter,
-  AdapterPostableMessage,
   Attachment,
   Author,
   ChatInstance,
@@ -34,6 +32,7 @@ import { parseInboundEmojis } from "./lib/emojis.js";
 import { deserializePostbackData } from "./lib/flex-messages.js";
 import { LineFormatConverter } from "./lib/format-converter.js";
 import { isNonEmptyString } from "./lib/guards.js";
+import { isRecord } from "./lib/is-record.js";
 import { isLifecycleEvent, toLifecycleEvent } from "./lib/lifecycle-events.js";
 import { parseInboundLocation } from "./lib/locations.js";
 import { parseInboundMedia } from "./lib/media.js";
@@ -612,7 +611,8 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   ): Promise<RawMessage<LineEvent>> {
     const { sourceId, sourceType } = this.decodeThreadId(threadId);
 
-    const files = extractFiles(message as AdapterPostableMessage);
+    const files =
+      isRecord(message) && Array.isArray(message.files) ? message.files : [];
     if (files.length > 0) {
       this.logger.warn("File attachments are not directly supported in LINE", {
         count: files.length,

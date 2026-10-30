@@ -4,7 +4,6 @@ import crypto from "node:crypto";
 import {
   AdapterError,
   AdapterRateLimitError,
-  PermissionError,
   ValidationError,
 } from "@chat-adapter/shared";
 import { HTTPFetchError, LineBotClient } from "@line/bot-sdk";
@@ -235,6 +234,8 @@ const requireCredential = (
 
 export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   readonly name = "line";
+  readonly persistThreadHistory = true;
+  readonly persistMessageHistory = true;
   readonly userName: string;
 
   private chat: ChatInstance | null = null;
@@ -950,7 +951,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     _threadId: string,
     _options?: FetchOptions
   ): Promise<FetchResult<LineEvent>> {
-    throw new PermissionError("line", "LINE does not provide message history");
+    return Promise.resolve({ messages: [] });
   }
 
   async fetchThread(threadId: string): Promise<ThreadInfo> {

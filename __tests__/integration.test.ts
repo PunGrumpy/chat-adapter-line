@@ -1,11 +1,13 @@
 /* eslint-disable max-classes-per-file */
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { createMemoryState } from "@chat-adapter/state-memory";
 import { Chat } from "chat";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { createLineAdapter } from "../src/index.js";
+import { isRecord } from "../src/lib/is-record.js";
 import type {
   LineEvent,
   LineMessageEvent,
@@ -73,6 +75,32 @@ const botMention: NonNullable<LineMessageEvent["message"]["mention"]> = {
       userId: BOT_USER_ID,
     },
   ],
+};
+
+const FIRST_CHAT_VERSION_WITH_HISTORY = { major: 4, minor: 20 };
+
+const readInstalledChatVersion = (): string => {
+  const manifest: unknown = JSON.parse(
+    readFileSync(
+      new URL("../node_modules/chat/package.json", import.meta.url),
+      "utf-8"
+    )
+  );
+  if (!isRecord(manifest) || typeof manifest.version !== "string") {
+    throw new Error("Could not read the installed chat version");
+  }
+  return manifest.version;
+};
+
+const chatKeepsThreadHistory = (): boolean => {
+  const [major = 0, minor = 0] = readInstalledChatVersion()
+    .split(".")
+    .map(Number);
+  return (
+    major > FIRST_CHAT_VERSION_WITH_HISTORY.major ||
+    (major === FIRST_CHAT_VERSION_WITH_HISTORY.major &&
+      minor >= FIRST_CHAT_VERSION_WITH_HISTORY.minor)
+  );
 };
 
 let eventCount = 0;
@@ -294,4 +322,57 @@ describe("LINE adapter inside a real Chat", () => {
     expect(texts.join(" ")).toBe(words.join(" "));
     expect(mocks.pushMessage).not.toHaveBeenCalled();
   });
+
+  it("lets a handler read thread history without an error", async () => {
+    const outcomes: string[] = [];
+    bot.onNewMention(async (thread) => {
+      try {
+        await thread.refresh();
+        for await (const message of thread.messages) {
+          outcomes.push(`saw ${message.id}`);
+        }
+        outcomes.push("read history");
+      } catch (error) {
+        outcomes.push(`failed: ${String(error)}`);
+      }
+    });
+
+    await postWebhook([makeGroupTextEvent(`${BOT_MENTION} hello`, botMention)]);
+
+    expect(outcomes.at(-1)).toBe("read history");
+  });
+
+  it.runIf(chatKeepsThreadHistory())(
+    "serves earlier group messages, including the bot's own reply, from the history the SDK kept",
+    async () => {
+      const firstText = `${BOT_MENTION} join us`;
+      const followUpText = "a follow-up with no mention";
+      const seen: { messages: string[]; recent: string[] }[] = [];
+      bot.onNewMention(async (thread) => {
+        await thread.subscribe();
+        await thread.post("welcome");
+      });
+      bot.onSubscribedMessage(async (thread) => {
+        await thread.refresh();
+        const messages: string[] = [];
+        for await (const message of thread.messages) {
+          messages.push(message.text);
+        }
+        seen.push({
+          messages,
+          recent: thread.recentMessages.map((message) => message.text),
+        });
+      });
+
+      await postWebhook([makeGroupTextEvent(firstText, botMention)]);
+      await postWebhook([makeGroupTextEvent(followUpText)]);
+
+      expect(seen).toEqual([
+        {
+          messages: [followUpText, "welcome", firstText],
+          recent: [firstText, "welcome", followUpText],
+        },
+      ]);
+    }
+  );
 });

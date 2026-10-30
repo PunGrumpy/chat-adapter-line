@@ -7,7 +7,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   AdapterError,
   AdapterRateLimitError,
-  PermissionError,
   ValidationError,
 } from "@chat-adapter/shared";
 import { deriveChannelId, NotImplementedError, parseMarkdown } from "chat";
@@ -2466,8 +2465,10 @@ describe("LineAdapter", () => {
   });
 
   describe("fetchMessages", () => {
-    it("throws PermissionError", () => {
-      expect(() => adapter.fetchMessages("thread-1")).toThrow(PermissionError);
+    it("resolves to an empty page", async () => {
+      await expect(
+        adapter.fetchMessages("line:bot-123:user:u-123")
+      ).resolves.toEqual({ messages: [] });
     });
   });
 

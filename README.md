@@ -115,6 +115,14 @@ bot.onSubscribedMessage(async (thread, message) => {
 
 `thread.startTyping()` shows LINE's loading animation in a 1:1 chat for up to 20 seconds, or until the bot's next message arrives. LINE has no typing indicator in groups or rooms, so the call does nothing there. A failed request is logged at debug level and never throws. While `thread.post()` collects a stream, the adapter renews the animation until the stream ends.
 
+### What LINE cannot do
+
+LINE has no API to edit or delete a sent message or to add a reaction. `editMessage()`, `deleteMessage()`, `addReaction()`, and `removeReaction()` reject with the Chat SDK's `NotImplementedError`, so check for it with `instanceof` where you want to skip these calls on LINE.
+
+LINE has no message history API either. The adapter has the Chat SDK keep history in your state adapter instead, starting when the bot receives its first message. `thread.messages` and `thread.refresh()` read from it, and by default the SDK keeps the newest 100 messages per thread for seven days. This needs `chat` 4.20.0 or later. On earlier versions both return no messages.
+
+In groups and rooms, members who have not shared their profile with the channel all appear as the author `"unknown"`, so they share one author in that history.
+
 ### Posting LINE-native messages
 
 The Chat SDK's `PostableMessage` type does not know about LINE's extra fields, so wrap LINE-native postables in `linePostable()` when calling `thread.post()`. The helper only narrows the static type. The adapter accepts these shapes at runtime either way.

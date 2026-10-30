@@ -4,7 +4,6 @@ import crypto from "node:crypto";
 import {
   AdapterError,
   AdapterRateLimitError,
-  PermissionError,
   ValidationError,
 } from "@chat-adapter/shared";
 import { HTTPFetchError, LineBotClient } from "@line/bot-sdk";
@@ -26,7 +25,7 @@ import type {
   ThreadInfo,
   WebhookOptions,
 } from "chat";
-import { ConsoleLogger } from "chat";
+import { ConsoleLogger, NotImplementedError } from "chat";
 
 import { parseInboundEmojis } from "./lib/emojis.js";
 import { deserializePostbackData } from "./lib/flex-messages.js";
@@ -235,6 +234,8 @@ const requireCredential = (
 
 export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   readonly name = "line";
+  readonly persistThreadHistory = true;
+  readonly persistMessageHistory = true;
   readonly userName: string;
 
   private chat: ChatInstance | null = null;
@@ -906,11 +907,21 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     _messageId: string,
     _message: LinePostableMessage
   ): Promise<RawMessage<LineEvent>> {
-    throw new PermissionError("line", "LINE does not support message editing");
+    return Promise.reject(
+      new NotImplementedError(
+        "LINE does not support message editing",
+        "editMessage"
+      )
+    );
   }
 
   deleteMessage(_threadId: string, _messageId: string): Promise<void> {
-    throw new PermissionError("line", "LINE does not support message deletion");
+    return Promise.reject(
+      new NotImplementedError(
+        "LINE does not support message deletion",
+        "deleteMessage"
+      )
+    );
   }
 
   addReaction(
@@ -918,7 +929,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     _messageId: string,
     _emoji: EmojiValue | string
   ): Promise<void> {
-    throw new PermissionError("line", "LINE does not support reactions");
+    return Promise.reject(
+      new NotImplementedError("LINE does not support reactions", "addReaction")
+    );
   }
 
   removeReaction(
@@ -926,14 +939,19 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     _messageId: string,
     _emoji: EmojiValue | string
   ): Promise<void> {
-    throw new PermissionError("line", "LINE does not support reactions");
+    return Promise.reject(
+      new NotImplementedError(
+        "LINE does not support reactions",
+        "removeReaction"
+      )
+    );
   }
 
   fetchMessages(
     _threadId: string,
     _options?: FetchOptions
   ): Promise<FetchResult<LineEvent>> {
-    throw new PermissionError("line", "LINE does not provide message history");
+    return Promise.resolve({ messages: [] });
   }
 
   async fetchThread(threadId: string): Promise<ThreadInfo> {

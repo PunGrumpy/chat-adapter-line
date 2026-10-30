@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
+  AdapterError,
   AdapterRateLimitError,
   PermissionError,
   ValidationError,
@@ -50,6 +51,7 @@ const mocks = vi.hoisted(() => {
     getBotInfo: vi.fn(),
     getGroupSummary: vi.fn(),
     getMessageContent: vi.fn(),
+    getMessageContentWithHttpInfo: vi.fn(),
     getProfile: vi.fn(),
     multicastWithHttpInfo: vi.fn(),
     pushMessage: vi.fn(),
@@ -64,6 +66,7 @@ vi.mock("@line/bot-sdk", () => {
     getBotInfo = mocks.getBotInfo;
     getGroupSummary = mocks.getGroupSummary;
     getMessageContent = mocks.getMessageContent;
+    getMessageContentWithHttpInfo = mocks.getMessageContentWithHttpInfo;
     getProfile = mocks.getProfile;
     multicastWithHttpInfo = mocks.multicastWithHttpInfo;
     pushMessage = mocks.pushMessage;
@@ -1686,6 +1689,61 @@ describe("LineAdapter", () => {
       await expect(attachment.fetchData?.()).rejects.toBeInstanceOf(
         AdapterRateLimitError
       );
+    });
+
+    it("rejects with CONTENT_NOT_READY while LINE is still preparing the content", async () => {
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([]),
+        httpResponse: new Response(null, { status: 202 }),
+      });
+      const event = makeEvent({
+        message: { id: "vid-202", type: "video" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      const rejection = await attachment
+        .fetchData?.()
+        .catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(AdapterError);
+      expect(rejection).toMatchObject({
+        adapter: "line",
+        code: "CONTENT_NOT_READY",
+        message: expect.stringContaining("video"),
+      });
+    });
+
+    it("resolves with the bytes once LINE has finished preparing the content", async () => {
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([Buffer.from("video-bytes")]),
+        httpResponse: new Response(null, { status: 200 }),
+      });
+      const event = makeEvent({
+        message: { id: "vid-200", type: "video" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      const data = await attachment.fetchData?.();
+
+      expect(data?.toString()).toBe("video-bytes");
+    });
+
+    it("leaves fetchData unset for a file the sender's app hosts", () => {
+      const event = makeEvent({
+        message: {
+          contentProvider: {
+            originalContentUrl: "https://example.com/original.jpg",
+            previewImageUrl: "https://example.com/preview.jpg",
+            type: "external",
+          },
+          id: "img-ext",
+          type: "image",
+        },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      expect(attachment.fetchData).toBeUndefined();
+      expect(attachment.url).toBe("https://example.com/original.jpg");
     });
 
     it("drops the attachment when a media message carries no ID", () => {

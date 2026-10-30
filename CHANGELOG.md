@@ -1,5 +1,16 @@
 # chat-adapter-line
 
+## 0.1.8
+
+### Patch Changes
+
+- 2cb186b: Accept Flex alt text up to LINE's 1500-character limit, keep card button labels up to 40 characters without cutting an emoji or a Thai letter in half, and reject more than 20 LINE emoji in one message before calling LINE.
+- f4dc502: Reject `fetchData()` with a `CONTENT_NOT_READY` error while LINE is still preparing a video or audio file, instead of returning empty bytes, and leave `fetchData` unset for files hosted outside LINE.
+- 818666d: Reject edit, delete, and reaction calls with the Chat SDK's `NotImplementedError` (was `PermissionError`, thrown synchronously), and let the SDK keep thread history for LINE so `thread.messages` and `thread.refresh()` work.
+- 79cddc4: Render the Chat SDK's `emoji` placeholders as Unicode emoji instead of sending `{{emoji:name}}` text to LINE users. This covers string, `text`, `raw`, Markdown, and AST postables, streamed replies, `toPlainText()`, and card titles, text, button labels, and notification text. A `text` or `raw` postable that mixes a placeholder with positioned `mentions` or `emojis` throws a `ValidationError`, because converting the placeholder would shift those positions. Use Unicode emoji directly in that case.
+- 4e15795: Split long `thread.post()` text into several LINE messages the way streamed replies are split, instead of throwing, and throw before calling LINE when a post renders to empty text.
+- a8164d4: Split long streamed replies on word and grapheme boundaries, so Thai text, emoji sequences, and accented letters are never cut in half between two LINE messages.
+
 ## 0.1.7
 
 ### Patch Changes

@@ -1,4 +1,5 @@
 import { ValidationError } from "@chat-adapter/shared";
+import { convertEmojiPlaceholders } from "chat";
 
 import type {
   LineEmoji,
@@ -10,6 +11,16 @@ import { isRecord } from "./is-record.js";
 
 /** LINE stands one native emoji in for a single `$` in the text it sends. */
 export const EMOJI_PLACEHOLDER = "$";
+
+const SDK_EMOJI_PLACEHOLDER_PATTERN = /\{\{emoji:[a-z0-9_]+\}\}/i;
+
+export const hasSdkEmojiPlaceholder = (text: string): boolean =>
+  SDK_EMOJI_PLACEHOLDER_PATTERN.test(text);
+
+// LINE renders Unicode emoji, which the SDK's "gchat" format produces. Its
+// platform union has no "line".
+export const renderSdkEmoji = (text: string): string =>
+  convertEmojiPlaceholders(text, "gchat");
 
 /**
  * Reads LINE's `emojis` array off an inbound text message.

@@ -15,6 +15,8 @@ import {
   text,
 } from "chat";
 
+import { renderSdkEmoji } from "./emojis.js";
+
 const AUTOLINK_SCHEMES = ["mailto:", "http://", "https://"] as const;
 
 const isBareUrl = (label: string, url: string): boolean =>
@@ -35,7 +37,7 @@ export class LineFormatConverter extends BaseFormatConverter {
   }
 
   fromAst(ast: Root): string {
-    return this.renderBlocks(ast.children);
+    return renderSdkEmoji(this.renderBlocks(ast.children));
   }
 
   private renderBlocks(nodes: Content[]): string {

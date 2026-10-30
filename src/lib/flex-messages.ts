@@ -2,6 +2,7 @@ import { ValidationError } from "@chat-adapter/shared";
 import type { messagingApi } from "@line/bot-sdk";
 import type { ButtonElement, CardElement } from "chat";
 
+import { renderSdkEmoji } from "./emojis.js";
 import { isRecord } from "./is-record.js";
 
 const MAX_POSTBACK_DATA_LENGTH = 300;
@@ -66,17 +67,24 @@ const buildBodyContents = (card: CardElement): messagingApi.FlexComponent[] => {
   const contents: messagingApi.FlexComponent[] = [];
 
   if (card.title) {
-    contents.push(toFlexText(card.title, { size: "xl", weight: "bold" }));
+    contents.push(
+      toFlexText(renderSdkEmoji(card.title), { size: "xl", weight: "bold" })
+    );
   }
 
   for (const child of card.children) {
     if (child.type === "text") {
-      contents.push(toFlexText(child.content, { margin: "md", size: "md" }));
+      contents.push(
+        toFlexText(renderSdkEmoji(child.content), { margin: "md", size: "md" })
+      );
     } else if (child.type === "section") {
       for (const sectionChild of child.children) {
         if (sectionChild.type === "text") {
           contents.push(
-            toFlexText(sectionChild.content, { margin: "sm", size: "sm" })
+            toFlexText(renderSdkEmoji(sectionChild.content), {
+              margin: "sm",
+              size: "sm",
+            })
           );
         }
       }
@@ -93,7 +101,7 @@ const buildFooterButton = (
     return null;
   }
 
-  const label = button.label || button.id;
+  const label = renderSdkEmoji(button.label || button.id);
 
   return {
     action: {
@@ -168,7 +176,7 @@ export const buildFlexMessage = (
   }
 
   return {
-    altText: card.title || "Flex Message",
+    altText: renderSdkEmoji(card.title || "Flex Message"),
     contents: bubble,
     type: "flex",
   };

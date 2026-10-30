@@ -7,7 +7,7 @@
 The adapter needs `chat` 4.17.0 or a later 4.x release:
 
 ```bash
-npm install chat-adapter-line chat
+npm install chat-adapter-line chat @chat-adapter/state-memory
 ```
 
 ## Set up a bot
@@ -15,6 +15,7 @@ npm install chat-adapter-line chat
 Create a `Chat` instance with the LINE adapter and register handlers:
 
 ```typescript
+import { createMemoryState } from "@chat-adapter/state-memory";
 import { Chat } from "chat";
 import { createLineAdapter } from "chat-adapter-line";
 
@@ -23,6 +24,7 @@ const bot = new Chat({
   adapters: {
     line: createLineAdapter(),
   },
+  state: createMemoryState(),
 });
 
 bot.onNewMention(async (thread) => {
@@ -34,6 +36,8 @@ bot.onSubscribedMessage(async (thread, message) => {
   await thread.post(`You said: ${message.text}`);
 });
 ```
+
+The memory state is for development. It loses its data on restart, and its locks are not shared across instances. Production needs a persistent adapter such as `@chat-adapter/state-redis`.
 
 The factory reads credentials from environment variables by default:
 
@@ -51,6 +55,29 @@ const adapter = createLineAdapter({
 });
 ```
 
+### Connect the webhook
+
+Expose the adapter's webhook from a route. This Next.js App Router file is `app/api/webhooks/line/route.ts`, and `bot` is the `Chat` instance from the setup above:
+
+```typescript
+import { after } from "next/server";
+
+import { bot } from "@/lib/bot";
+
+export const POST = (request: Request) =>
+  bot.webhooks.line(request, { waitUntil: (task) => after(() => task) });
+```
+
+`waitUntil` keeps a serverless function alive until your handlers finish.
+
+Then connect LINE to the route:
+
+1. In the LINE Developers Console, open the channel's "Messaging API" tab.
+2. Set the Webhook URL to the route's public URL.
+3. Turn on "Use webhook".
+4. Press "Verify".
+5. In the LINE Official Account Manager, turn off auto-reply messages so LINE does not answer on the bot's behalf.
+
 ### Reply-token-first sending
 
 LINE does not bill Reply API calls, but each Push API call counts against the channel's monthly message quota. That quota varies by plan and by country or region.
@@ -61,9 +88,13 @@ When your bot answers an inbound message, the adapter sends that first reply thr
 
 LINE cannot edit a sent message, so `thread.post()` with a text stream, such as an AI SDK `textStream`, cannot grow a message in place. The adapter collects the whole stream and renders it like a Markdown postable. It then sends as many text messages as LINE's 5000-character limit needs, five to a request. The first request goes through the free Reply API when a reply token is fresh. The adapter drops nothing, however long the reply. In a 1:1 chat, LINE's loading animation shows while the adapter collects the stream, renewed every 15 seconds until the stream ends. Call `thread.startTyping()` as well when your handler does other work before it starts streaming.
 
+### Bursts of messages
+
+A user who sends several photos at once produces several message events at the same moment. The Chat SDK's default is `concurrency: "drop"`, so the events after the first are discarded while a handler runs. The SDK offers other strategies. See the [Chat SDK concurrency docs](https://chat-sdk.dev/docs/concurrency).
+
 ### Direct messages and mentions
 
-A LINE thread whose source is a single user is a direct message, so `bot.onDirectMessage()` fires for 1:1 chats. In groups and rooms, LINE delivers native mentions as structured data. The adapter parses them onto the message and sets `message.isMention` when someone mentions the bot, so `onNewMention()` and `onMention()` work without any `@name` text matching. Each LINE conversation is its own Chat SDK channel, so `thread.channel.post()` sends to the same 1:1 chat, group, or room, and `thread.channel.setState()` keeps state for that conversation alone.
+A LINE thread whose source is a single user is a direct message, so `bot.onDirectMessage()` fires for 1:1 chats. That handler needs `chat` 4.20.0 or later. In groups and rooms, LINE delivers native mentions as structured data. The adapter parses them onto the message and sets `message.isMention` when someone mentions the bot, so `onNewMention()` works without any `@name` text matching. Each LINE conversation is its own Chat SDK channel, so `thread.channel.post()` sends to the same 1:1 chat, group, or room, and `thread.channel.setState()` keeps state for that conversation alone.
 
 Inbound text messages are `LineMessage` instances. Each entry in `message.mentions` has a `type` of `user` or `all`, plus `index` and `length` for its position in the text. User mentions also carry `userId` and `isSelf` when the mentioned user has shared their profile with the channel:
 
@@ -423,7 +454,7 @@ export const POST = (request: Request) =>
 
 LINE issues a reply token with `follow`, `join`, and `memberJoined`, and the adapter stores it, so a welcome message sent from the handler goes out over the free Reply API instead of the quota-metered Push API.
 
-Two behaviors differ from message delivery on purpose. A redelivered lifecycle event is still delivered, with `isRedelivery` set, because a missed `unfollow` cannot be recovered the way a missed message can be resent. A standby-mode event is delivered too, with `mode` set to `standby`. Filter on those fields, and deduplicate on `webhookEventId`, which LINE guarantees is unique per delivery.
+Two behaviors differ from message delivery on purpose. A redelivered lifecycle event is still delivered, with `isRedelivery` set, because a missed `unfollow` cannot be recovered the way a missed message can be resent. A standby-mode event is delivered too, with `mode` set to `standby`. Filter on those fields, and deduplicate on `webhookEventId`, which is unique per event. LINE keeps the same ID when it redelivers an event.
 
 ### Broadcast and multicast
 

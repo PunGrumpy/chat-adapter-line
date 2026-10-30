@@ -10,7 +10,7 @@ import {
   PermissionError,
   ValidationError,
 } from "@chat-adapter/shared";
-import { deriveChannelId, parseMarkdown } from "chat";
+import { deriveChannelId, NotImplementedError, parseMarkdown } from "chat";
 import {
   afterEach,
   beforeEach,
@@ -2434,34 +2434,34 @@ describe("LineAdapter", () => {
   });
 
   describe("editMessage", () => {
-    it("throws PermissionError", () => {
-      expect(() =>
-        adapter.editMessage("thread-1", "msg-1", "new text")
-      ).toThrow(PermissionError);
+    it("rejects with NotImplementedError", async () => {
+      await expect(
+        adapter.editMessage("line:bot-123:user:u-123", "msg-1", "new text")
+      ).rejects.toBeInstanceOf(NotImplementedError);
     });
   });
 
   describe("deleteMessage", () => {
-    it("throws PermissionError", () => {
-      expect(() => adapter.deleteMessage("thread-1", "msg-1")).toThrow(
-        PermissionError
-      );
+    it("rejects with NotImplementedError", async () => {
+      await expect(
+        adapter.deleteMessage("line:bot-123:user:u-123", "msg-1")
+      ).rejects.toBeInstanceOf(NotImplementedError);
     });
   });
 
   describe("addReaction", () => {
-    it("throws PermissionError", () => {
-      expect(() => adapter.addReaction("thread-1", "msg-1", "👍")).toThrow(
-        PermissionError
-      );
+    it("rejects with NotImplementedError", async () => {
+      await expect(
+        adapter.addReaction("line:bot-123:user:u-123", "msg-1", "👍")
+      ).rejects.toBeInstanceOf(NotImplementedError);
     });
   });
 
   describe("removeReaction", () => {
-    it("throws PermissionError", () => {
-      expect(() => adapter.removeReaction("thread-1", "msg-1", "👍")).toThrow(
-        PermissionError
-      );
+    it("rejects with NotImplementedError", async () => {
+      await expect(
+        adapter.removeReaction("line:bot-123:user:u-123", "msg-1", "👍")
+      ).rejects.toBeInstanceOf(NotImplementedError);
     });
   });
 

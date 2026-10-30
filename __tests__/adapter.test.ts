@@ -50,7 +50,6 @@ const mocks = vi.hoisted(() => {
     broadcastWithHttpInfo: vi.fn(),
     getBotInfo: vi.fn(),
     getGroupSummary: vi.fn(),
-    getMessageContent: vi.fn(),
     getMessageContentWithHttpInfo: vi.fn(),
     getProfile: vi.fn(),
     multicastWithHttpInfo: vi.fn(),
@@ -65,7 +64,6 @@ vi.mock("@line/bot-sdk", () => {
     broadcastWithHttpInfo = mocks.broadcastWithHttpInfo;
     getBotInfo = mocks.getBotInfo;
     getGroupSummary = mocks.getGroupSummary;
-    getMessageContent = mocks.getMessageContent;
     getMessageContentWithHttpInfo = mocks.getMessageContentWithHttpInfo;
     getProfile = mocks.getProfile;
     multicastWithHttpInfo = mocks.multicastWithHttpInfo;
@@ -1645,30 +1643,34 @@ describe("LineAdapter", () => {
     });
 
     it("still fetches content lazily through the LINE client", async () => {
-      mocks.getMessageContent.mockResolvedValue(
-        Readable.from([Buffer.from("file-bytes")])
-      );
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([Buffer.from("file-bytes")]),
+        httpResponse: new Response(null, { status: 200 }),
+      });
       const event = makeEvent({
         message: { fileName: "report.pdf", id: "file-1", type: "file" },
       } as never);
       const [attachment] = adapter.parseMessage(event).attachments;
 
-      expect(mocks.getMessageContent).not.toHaveBeenCalled();
+      expect(mocks.getMessageContentWithHttpInfo).not.toHaveBeenCalled();
 
       const data = await attachment.fetchData?.();
 
-      expect(mocks.getMessageContent).toHaveBeenCalledWith("file-1");
+      expect(mocks.getMessageContentWithHttpInfo).toHaveBeenCalledWith(
+        "file-1"
+      );
       expect(data?.toString()).toBe("file-bytes");
     });
 
     it("joins content that arrives in several chunks", async () => {
-      mocks.getMessageContent.mockResolvedValue(
-        Readable.from([
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([
           Buffer.from("part-1|"),
           Buffer.from("part-2|"),
           "part-3",
-        ])
-      );
+        ]),
+        httpResponse: new Response(null, { status: 200 }),
+      });
       const event = makeEvent({
         message: { id: "img-9", type: "image" },
       } as never);
@@ -1680,7 +1682,9 @@ describe("LineAdapter", () => {
     });
 
     it("maps a rate-limited content download to AdapterRateLimitError", async () => {
-      mocks.getMessageContent.mockRejectedValue(makeRateLimitError(7));
+      mocks.getMessageContentWithHttpInfo.mockRejectedValue(
+        makeRateLimitError(7)
+      );
       const event = makeEvent({
         message: { id: "img-429", type: "image" },
       } as never);

@@ -324,6 +324,8 @@ What LINE reports depends on the message: a name and size for files, a duration 
 
 The attachment itself now carries what the Chat SDK has slots for, so code that never touches `message.media` benefits too: `name` is the sender's file name instead of a synthetic one, `size` is the byte count, and `url` points at an externally hosted file. LINE serves its own uploads through an authenticated API rather than a public URL, so `url` stays unset for those and `fetchData()` remains the way to read them. Fetching is still deferred: nothing is downloaded while the webhook is parsed.
 
+LINE needs time to prepare a large video or audio file before it can serve the bytes. Until it finishes, `fetchData()` rejects with an `AdapterError` whose `code` is `CONTENT_NOT_READY`, so catch it and call `fetchData()` again later. For a file the sender's app hosts, `fetchData` is unset and `attachment.url` points at the sender-controlled file, so treat whatever it serves as untrusted input.
+
 ### Images and videos
 
 Pass an `image` or `video` object with the media URL and a thumbnail to send a native LINE image or video message:

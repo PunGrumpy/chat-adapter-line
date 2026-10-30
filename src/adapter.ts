@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 
 import {
+  AdapterError,
   AdapterRateLimitError,
   extractFiles,
   PermissionError,
@@ -103,6 +104,8 @@ const verifySignature = (
 
   return crypto.timingSafeEqual(received, expected);
 };
+
+const CONTENT_PREPARING_STATUS = 202;
 
 const readableToBuffer = async (
   readable: NodeJS.ReadableStream
@@ -542,16 +545,27 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     if (media) {
       const messageId = media.providerMessageId;
       const attachment: Attachment = {
-        fetchData: async () => {
-          const stream = await this.callLine(() =>
-            this.client.getMessageContent(messageId)
-          );
-          return readableToBuffer(stream);
-        },
         mimeType: getMimeType(media.kind),
         name: media.fileName ?? `${media.kind}-${messageId}`,
         type: media.kind,
       };
+
+      // LINE's content API answers 404 for a file the sender's app hosts.
+      if (media.contentProvider?.type !== "external") {
+        attachment.fetchData = async () => {
+          const { body, httpResponse } = await this.callLine(() =>
+            this.client.getMessageContentWithHttpInfo(messageId)
+          );
+          if (httpResponse.status === CONTENT_PREPARING_STATUS) {
+            throw new AdapterError(
+              `LINE is still preparing this ${media.kind}. Call fetchData() again later.`,
+              "line",
+              "CONTENT_NOT_READY"
+            );
+          }
+          return readableToBuffer(body);
+        };
+      }
 
       if (media.fileSize !== undefined) {
         attachment.size = media.fileSize;

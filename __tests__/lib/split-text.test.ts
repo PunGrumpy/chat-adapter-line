@@ -2,6 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { splitText } from "../../src/lib/split-text.js";
 
+const LEADING_MARK = /^\p{M}/u;
+const COMBINING_ACUTE = "́";
+const FAMILY = "👨‍👩‍👧";
+
 describe("splitText", () => {
   it("returns text within the limit as one part", () => {
     expect(splitText("hello", 10)).toEqual(["hello"]);
@@ -45,6 +49,56 @@ describe("splitText", () => {
       "a".repeat(9),
       "😀b",
     ]);
+  });
+
+  it("never starts a part with the vowel or tone mark of a Thai letter", () => {
+    const text = `${"ก".repeat(9)}กี่`;
+    const parts = splitText(text, 10);
+
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.join("")).toBe(text);
+    expect(parts.every((part) => part.length <= 10)).toBe(true);
+    expect(parts.some((part) => LEADING_MARK.test(part))).toBe(false);
+  });
+
+  it("never splits a joined emoji sequence", () => {
+    expect(splitText(`${"a".repeat(5)}${FAMILY}`, 8)).toEqual([
+      "a".repeat(5),
+      FAMILY,
+    ]);
+  });
+
+  it("never splits a flag", () => {
+    expect(splitText("🇹🇭🇯🇵", 6)).toEqual(["🇹🇭", "🇯🇵"]);
+  });
+
+  it("never separates a letter from its combining accent", () => {
+    const accented = `e${COMBINING_ACUTE}`;
+
+    expect(splitText(accented.repeat(5), 5)).toEqual([
+      accented.repeat(2),
+      accented.repeat(2),
+      accented,
+    ]);
+  });
+
+  it("still makes progress through a cluster longer than the limit", () => {
+    const text = `e${COMBINING_ACUTE.repeat(12)}`;
+    const parts = splitText(text, 5);
+
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.join("")).toBe(text);
+    expect(parts.every((part) => part.length <= 5)).toBe(true);
+  });
+
+  it("splits Thai text without spaces inside every letter cluster", () => {
+    const text = "สวัสดีครับยินดีต้อนรับ".repeat(20);
+    const parts = splitText(text, 50);
+
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.join("")).toBe(text);
+    expect(parts.every((part) => part.length <= 50)).toBe(true);
+    expect(parts.some((part) => LEADING_MARK.test(part))).toBe(false);
   });
 
   it("keeps every part within the limit and loses only separators", () => {

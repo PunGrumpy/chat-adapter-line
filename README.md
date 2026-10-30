@@ -119,7 +119,9 @@ bot.onSubscribedMessage(async (thread, message) => {
 
 The Chat SDK's `PostableMessage` type does not know about LINE's extra fields, so wrap LINE-native postables in `linePostable()` when calling `thread.post()`. The helper only narrows the static type. The adapter accepts these shapes at runtime either way.
 
-LINE caps a text message at 5000 characters, counted in UTF-16 code units the way `String.prototype.length` counts them. The adapter measures the text it would send, after mention and emoji placeholders and brace escaping are applied, and throws a `ValidationError` instead of calling LINE when that passes the cap. Markdown and AST postables are measured after rendering.
+LINE caps a text message at 5000 characters, counted in UTF-16 code units the way `String.prototype.length` counts them. The adapter splits longer text into several text messages on paragraph, line, word, or character boundaries, the same way it splits a streamed reply, and sends them five to a request. The first request goes through the Reply API when a reply token is fresh, and a `quoteToken` rides on the first message only. Markdown and AST postables are split after rendering.
+
+Text with `mentions` or `emojis` is never split, because LINE positions them by offset inside one message. The adapter measures it after mention and emoji placeholders and brace escaping are applied, and throws a `ValidationError` instead of calling LINE when that passes the cap. A post whose text is empty, or renders to nothing, such as a lone `---`, also throws a `ValidationError` before the adapter calls LINE.
 
 LINE displays no Markdown, so the adapter renders Markdown and AST postables as plain text. It drops emphasis and heading marks. Code keeps its exact text without fences, a link keeps its URL as `text (url)`, and list items keep their `-` or `1.` markers. The adapter never reads inbound text as Markdown either, so `message.formatted` holds exactly what the user typed.
 

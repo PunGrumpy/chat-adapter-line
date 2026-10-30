@@ -628,7 +628,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       );
     }
 
-    const result = await this.sendMessages(threadId, sourceId, lineMessages);
+    const result = await this.sendInBatches(threadId, sourceId, lineMessages);
     const sentType = lineMessages[0]?.type === "audio" ? "audio" : "text";
 
     return this.buildRawMessage(result, "", threadId, sentType);
@@ -749,6 +749,33 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     }
   }
 
+  /**
+   * Sends `messages` five to a request, since LINE accepts no more per reply
+   * or push. Returns the first request's result, which carries the ID of the
+   * first message sent.
+   */
+  private async sendInBatches(
+    threadId: string,
+    sourceId: string,
+    messages: messagingApi.Message[]
+  ): Promise<SendResult> {
+    let first: SendResult | undefined;
+    for (
+      let start = 0;
+      start < messages.length;
+      start += MAX_MESSAGES_PER_REQUEST
+    ) {
+      const result = await this.sendMessages(
+        threadId,
+        sourceId,
+        messages.slice(start, start + MAX_MESSAGES_PER_REQUEST)
+      );
+      first ??= result;
+    }
+
+    return first ?? {};
+  }
+
   private pushMessages(
     sourceId: string,
     messages: messagingApi.Message[]
@@ -799,21 +826,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return this.buildEmptyRawMessage(threadId);
     }
 
-    let first: SendResult | undefined;
-    for (
-      let start = 0;
-      start < messages.length;
-      start += MAX_MESSAGES_PER_REQUEST
-    ) {
-      const result = await this.sendMessages(
-        threadId,
-        sourceId,
-        messages.slice(start, start + MAX_MESSAGES_PER_REQUEST)
-      );
-      first ??= result;
-    }
+    const result = await this.sendInBatches(threadId, sourceId, messages);
 
-    return this.buildRawMessage(first ?? {}, text, threadId);
+    return this.buildRawMessage(result, text, threadId);
   }
 
   private async collectStream(

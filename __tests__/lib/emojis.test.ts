@@ -5,9 +5,16 @@ import {
   normalizeEmojiSegments,
   parseInboundEmojis,
 } from "../../src/lib/emojis.js";
-import type { LineMessageEvent } from "../../src/types.js";
+import type { LineEmojiSegment, LineMessageEvent } from "../../src/types.js";
 
 const PRODUCT_ID = "5ac1bfd5040ab15980c9b435";
+
+const emojiSegments = (count: number): LineEmojiSegment[] =>
+  Array.from({ length: count }, (_, index) => ({
+    emojiId: "001",
+    index,
+    productId: PRODUCT_ID,
+  }));
 
 const textMessage = (
   overrides: Partial<LineMessageEvent["message"]> = {}
@@ -135,5 +142,19 @@ describe("normalizeEmojiSegments", () => {
         { emojiId: "001", index: 0, productId: PRODUCT_ID },
       ])
     ).toThrow(/must line up with a "\$"/);
+  });
+
+  it("accepts the 20 emoji LINE allows in one message", () => {
+    expect(
+      normalizeEmojiSegments("$".repeat(20), emojiSegments(20))
+    ).toHaveLength(20);
+  });
+
+  it("rejects more than 20 emoji in one message", () => {
+    const attempt = () =>
+      normalizeEmojiSegments("$".repeat(21), emojiSegments(21));
+
+    expect(attempt).toThrow(ValidationError);
+    expect(attempt).toThrow(/at most 20 emoji/);
   });
 });

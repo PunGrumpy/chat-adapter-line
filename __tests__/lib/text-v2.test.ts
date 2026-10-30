@@ -303,6 +303,43 @@ describe("buildTextMessage", () => {
     ).toThrow(/at most 100/);
   });
 
+  it("rejects more than 20 emoji in one message", () => {
+    expect(() =>
+      buildTextMessage("$".repeat(21), {
+        emojis: Array.from({ length: 21 }, (_, index) => ({
+          emojiId: "001",
+          index,
+          productId: PRODUCT_ID,
+        })),
+      })
+    ).toThrow(/at most 20 emoji/);
+  });
+
+  it("accepts 20 mentions and 20 emoji in the same message", () => {
+    const text = `${"@".repeat(20)}${"$".repeat(20)}`;
+
+    const message = buildTextMessage(text, {
+      emojis: Array.from({ length: 20 }, (_, offset) => ({
+        emojiId: "001",
+        index: 20 + offset,
+        productId: PRODUCT_ID,
+      })),
+      mentions: Array.from({ length: 20 }, (_, index) => ({
+        index,
+        length: 1,
+        userId: "U1",
+      })),
+    });
+
+    expect(message).toMatchObject({
+      substitution: {
+        emoji19: { type: "emoji" },
+        mention19: { type: "mention" },
+      },
+      type: "textV2",
+    });
+  });
+
   it("accepts a plain text of exactly the LINE limit", () => {
     expect(buildTextMessage("a".repeat(MAX_TEXT_LENGTH))).toMatchObject({
       type: "text",

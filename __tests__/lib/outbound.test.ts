@@ -1,4 +1,5 @@
 import { ValidationError } from "@chat-adapter/shared";
+import type { messagingApi } from "@line/bot-sdk";
 import { emoji, parseMarkdown } from "chat";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -13,8 +14,14 @@ import {
   validateMulticastRecipients,
   validateRetryKey,
 } from "../../src/lib/outbound.js";
+import { MAX_TEXT_LENGTH } from "../../src/lib/text-v2.js";
 
 const converter = new LineFormatConverter();
+
+const textsOf = (messages: messagingApi.Message[]): string[] =>
+  messages.flatMap((message) =>
+    message.type === "text" ? [message.text] : []
+  );
 
 describe("toLineMessages", () => {
   it("converts a string to a text message", () => {
@@ -463,6 +470,91 @@ describe("toLineMessages", () => {
       ValidationError
     );
     expect(() => toLineMessages(null as never, converter)).toThrow(
+      ValidationError
+    );
+  });
+
+  it("splits text over the LINE limit into several text messages", () => {
+    const words = Array.from({ length: 2400 }, (_, index) => `w${index}`);
+    const messages = toLineMessages(words.join(" "), converter);
+    const texts = textsOf(messages);
+
+    expect(messages).toHaveLength(3);
+    expect(texts).toHaveLength(3);
+    expect(texts.every((text) => text.length <= MAX_TEXT_LENGTH)).toBe(true);
+    expect(texts.join(" ").split(" ")).toEqual(words);
+  });
+
+  it.each(["text", "raw", "markdown"] as const)(
+    "puts the quote token of a long %s postable on the first part only",
+    (kind) => {
+      const messages = toLineMessages(
+        { [kind]: `${"a ".repeat(5999)}a`, quoteToken: "qt" } as never,
+        converter
+      );
+
+      expect(messages).toHaveLength(3);
+      expect(messages[0]).toMatchObject({ quoteToken: "qt", type: "text" });
+      expect(messages[1]).not.toHaveProperty("quoteToken");
+      expect(messages[2]).not.toHaveProperty("quoteToken");
+    }
+  );
+
+  it("splits long text rendered from an AST", () => {
+    const messages = toLineMessages(
+      {
+        ast: {
+          children: [
+            {
+              children: [{ type: "text", value: "a ".repeat(6000) }],
+              type: "paragraph",
+            },
+          ],
+          type: "root",
+        },
+      },
+      converter
+    );
+
+    expect(messages).toHaveLength(3);
+  });
+
+  it("still rejects long text that carries mentions", () => {
+    expect(() =>
+      toLineMessages(
+        {
+          mentions: [{ index: 3, length: 6, userId: "U-alice" }],
+          text: `Hi @Alice ${"a ".repeat(3000)}`,
+        },
+        converter
+      )
+    ).toThrow(/at most 5000 characters/);
+  });
+
+  it("still rejects long text that carries LINE emoji", () => {
+    expect(() =>
+      toLineMessages(
+        {
+          emojis: [
+            { emojiId: "001", index: 0, productId: "5ac1bfd5040ab15980c9b435" },
+          ],
+          text: `$ ${"a ".repeat(3000)}`,
+        },
+        converter
+      )
+    ).toThrow(/at most 5000 characters/);
+  });
+
+  it.each([
+    ["an empty string", ""],
+    ["an empty text postable", { text: "" }],
+    ["Markdown that renders to nothing", { markdown: "---" }],
+    [
+      "an empty Markdown post that only carries files",
+      { files: [{ data: Buffer.from("x"), filename: "a.txt" }], markdown: "" },
+    ],
+  ])("rejects %s instead of sending an empty text", (_name, message) => {
+    expect(() => toLineMessages(message as never, converter)).toThrow(
       ValidationError
     );
   });

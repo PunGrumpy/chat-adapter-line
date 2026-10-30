@@ -3353,14 +3353,77 @@ describe("LineAdapter", () => {
       }
     );
 
-    it("rejects a text over 5000 characters before calling LINE", async () => {
-      await expect(
-        adapter.postMessage("line:bot-123:user:u-123", "a".repeat(5001))
-      ).rejects.toBeInstanceOf(ValidationError);
+    it("splits a text over 5000 characters instead of rejecting it", async () => {
+      await adapter.postMessage("line:bot-123:user:u-123", "a".repeat(5001));
 
-      expect(mocks.pushMessage).not.toHaveBeenCalled();
-      expect(mocks.replyMessage).not.toHaveBeenCalled();
+      expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [
+          { text: "a".repeat(5000), type: "text" },
+          { text: "a", type: "text" },
+        ],
+        to: "u-123",
+      });
     });
+
+    it("sends a long post as a reply of five messages and a push of the rest", async () => {
+      await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+      const words = Array.from({ length: 5000 }, (_, index) => `w${index}`);
+
+      const result = await adapter.postMessage("line:bot-123:user:u-123", {
+        markdown: words.join(" "),
+      });
+
+      expect(mocks.replyMessage).toHaveBeenCalledOnce();
+      expect(mocks.pushMessage).toHaveBeenCalledOnce();
+      const [[{ messages: replied, replyToken }]] =
+        mocks.replyMessage.mock.calls;
+      const [[{ messages: pushed, to }]] = mocks.pushMessage.mock.calls;
+      expect(replyToken).toBe("fresh-reply-token");
+      expect(to).toBe("u-123");
+      expect(replied).toHaveLength(5);
+      expect(pushed).toHaveLength(1);
+
+      const texts = [...replied, ...pushed].map(
+        (message: { text: string; type: string }) => {
+          expect(message.type).toBe("text");
+          return message.text;
+        }
+      );
+      expect(texts.every((text) => text.length <= 5000)).toBe(true);
+      expect(texts.join(" ").split(" ")).toEqual(words);
+      expect(result.id).toBe("replied-1");
+    });
+
+    it.each([
+      ["an empty string", ""],
+      ["Markdown that renders to nothing", { markdown: "---" }],
+      [
+        "an empty Markdown post that only carries files",
+        {
+          files: [{ data: Buffer.from("x"), filename: "a.txt" }],
+          markdown: "",
+        },
+      ],
+    ])(
+      "refuses %s without spending the reply token",
+      async (_name, message) => {
+        await seedReplyToken(adapter, { replyToken: "fresh-reply-token" });
+
+        await expect(
+          adapter.postMessage("line:bot-123:user:u-123", message as never)
+        ).rejects.toBeInstanceOf(ValidationError);
+
+        expect(mocks.replyMessage).not.toHaveBeenCalled();
+        expect(mocks.pushMessage).not.toHaveBeenCalled();
+
+        await adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+        expect(mocks.replyMessage).toHaveBeenCalledExactlyOnceWith({
+          messages: [{ text: "Hello", type: "text" }],
+          replyToken: "fresh-reply-token",
+        });
+      }
+    );
 
     it("propagates provider failures for audio sends", async () => {
       mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));

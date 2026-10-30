@@ -275,4 +275,23 @@ describe("LINE adapter inside a real Chat", () => {
     expect(mentioned).toEqual([`${BOT_MENTION} hello`]);
     expect(mocks.replyMessage).toHaveBeenCalledTimes(1);
   });
+
+  it("sends a post longer than LINE's text limit as several messages in one reply", async () => {
+    const words = Array.from({ length: 2400 }, (_, index) => `w${index}`);
+    bot.onNewMention(async (thread) => {
+      await thread.post({ markdown: words.join(" ") });
+    });
+    const event = makeGroupTextEvent(`${BOT_MENTION} summarize`, botMention);
+
+    await postWebhook([event]);
+
+    expect(mocks.replyMessage).toHaveBeenCalledTimes(1);
+    const [[{ messages, replyToken }]] = mocks.replyMessage.mock.calls;
+    const texts = messages.map((message: { text: string }) => message.text);
+    expect(replyToken).toBe(event.replyToken);
+    expect(texts).toHaveLength(3);
+    expect(texts.every((text: string) => text.length <= 5000)).toBe(true);
+    expect(texts.join(" ")).toBe(words.join(" "));
+    expect(mocks.pushMessage).not.toHaveBeenCalled();
+  });
 });

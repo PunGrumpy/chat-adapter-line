@@ -2,7 +2,11 @@ import { ValidationError } from "@chat-adapter/shared";
 import { describe, expect, it } from "vite-plus/test";
 
 import { MAX_MENTIONS_PER_MESSAGE } from "../../src/lib/mentions.js";
-import { buildTextMessage, MAX_TEXT_LENGTH } from "../../src/lib/text-v2.js";
+import {
+  buildTextMessage,
+  buildTextMessages,
+  MAX_TEXT_LENGTH,
+} from "../../src/lib/text-v2.js";
 
 const PRODUCT_ID = "5ac1bfd5040ab15980c9b435";
 const ENCODED_EMOJI = "{emoji0}";
@@ -348,5 +352,43 @@ describe("buildTextMessage", () => {
         ],
       })
     ).toThrow(/at most 5000 characters/);
+  });
+});
+
+describe("buildTextMessages", () => {
+  it("keeps text of exactly the LINE limit in one message with its quote token", () => {
+    const text = "a".repeat(MAX_TEXT_LENGTH);
+
+    expect(buildTextMessages(text, { quoteToken: "qt" })).toEqual([
+      { quoteToken: "qt", text, type: "text" },
+    ]);
+  });
+
+  it("keeps a mention in one textV2 message", () => {
+    expect(
+      buildTextMessages("Hello @Alice, welcome", {
+        mentions: [{ index: 6, length: 6, userId: "U-alice" }],
+      })
+    ).toEqual([
+      {
+        substitution: {
+          mention0: {
+            mentionee: { type: "user", userId: "U-alice" },
+            type: "mention",
+          },
+        },
+        text: "Hello {mention0}, welcome",
+        type: "textV2",
+      },
+    ]);
+  });
+
+  it("splits text one character over the limit in two", () => {
+    const messages = buildTextMessages("a".repeat(MAX_TEXT_LENGTH + 1));
+
+    expect(messages).toEqual([
+      { text: "a".repeat(MAX_TEXT_LENGTH), type: "text" },
+      { text: "a", type: "text" },
+    ]);
   });
 });

@@ -4,6 +4,7 @@ import type { messagingApi } from "@line/bot-sdk";
 import type { LineTextOptions } from "../types.js";
 import { EMOJI_PLACEHOLDER, normalizeEmojiSegments } from "./emojis.js";
 import { normalizeMentionSegments, toMentionee } from "./mentions.js";
+import { splitText } from "./split-text.js";
 
 /**
  * LINE caps the text of a text message at 5000 characters, counted in UTF-16
@@ -112,4 +113,35 @@ export const buildTextMessage = (
   checkTextLength(encoded);
 
   return { substitution, text: encoded, type: "textV2", ...quote };
+};
+
+/**
+ * Builds the outbound LINE text messages for `text`.
+ *
+ * Plain text over 5000 characters is split the way streamed replies are, and
+ * only the first part carries the quote token. Text with mentions or emoji is
+ * never split, because both are positioned by offset in one message, so it
+ * still throws once it passes the limit. Text that is empty or blank throws
+ * instead of reaching LINE as an empty message.
+ */
+export const buildTextMessages = (
+  text: string,
+  options: LineTextOptions = {}
+): messagingApi.Message[] => {
+  const hasSubstitutions =
+    (options.mentions?.length ?? 0) > 0 || (options.emojis?.length ?? 0) > 0;
+
+  if (hasSubstitutions) {
+    return [buildTextMessage(text, options)];
+  }
+
+  const parts = splitText(text, MAX_TEXT_LENGTH);
+
+  if (parts.length === 0) {
+    throw new ValidationError("line", "No message content to send");
+  }
+
+  return parts.map((part, index) =>
+    buildTextMessage(part, index === 0 ? options : {})
+  );
 };

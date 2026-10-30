@@ -11,7 +11,7 @@ import { isRecord } from "./is-record.js";
 import { buildLocationMessage } from "./locations.js";
 import { buildAudioMessage, buildMediaMessage } from "./media.js";
 import { buildStickerMessage } from "./stickers.js";
-import { buildTextMessage } from "./text-v2.js";
+import { buildTextMessages } from "./text-v2.js";
 
 export const MAX_MESSAGES_PER_REQUEST = 5;
 
@@ -118,7 +118,7 @@ export const toLineMessages = (
   converter: LineFormatConverter
 ): messagingApi.Message[] => {
   if (typeof message === "string") {
-    return [buildTextMessage(renderSdkEmoji(message))];
+    return buildTextMessages(renderSdkEmoji(message));
   }
 
   if (!isRecord(message)) {
@@ -172,15 +172,17 @@ export const toLineMessages = (
   }
 
   if (typeof message.text === "string") {
-    return [
-      buildTextMessage(renderTextWithSdkEmoji(message.text, options), options),
-    ];
+    return buildTextMessages(
+      renderTextWithSdkEmoji(message.text, options),
+      options
+    );
   }
 
   if (typeof message.raw === "string") {
-    return [
-      buildTextMessage(renderTextWithSdkEmoji(message.raw, options), options),
-    ];
+    return buildTextMessages(
+      renderTextWithSdkEmoji(message.raw, options),
+      options
+    );
   }
 
   if (typeof message.markdown === "string") {
@@ -188,13 +190,13 @@ export const toLineMessages = (
     const rendered = converter.renderPostable(
       message as AdapterPostableMessage
     );
-    return [buildTextMessage(rendered, options)];
+    return buildTextMessages(rendered, options);
   }
 
   if (message.ast) {
     rejectMentionsAndEmoji(options, "ast");
     const rendered = converter.fromAst(message.ast as Root);
-    return [buildTextMessage(rendered, options)];
+    return buildTextMessages(rendered, options);
   }
 
   throw new ValidationError("line", "No message content to send");

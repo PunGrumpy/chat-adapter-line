@@ -102,10 +102,19 @@ const validateSegment = (segment: LineEmojiSegment, text: string): void => {
   }
 };
 
+export const MAX_EMOJI_PER_MESSAGE = 20;
+
 export const normalizeEmojiSegments = (
   text: string,
   segments: LineEmojiSegment[]
 ): LineEmojiSegment[] => {
+  if (segments.length > MAX_EMOJI_PER_MESSAGE) {
+    throw new ValidationError(
+      "line",
+      `LINE substitutes at most ${MAX_EMOJI_PER_MESSAGE} emoji per message, got ${segments.length}`
+    );
+  }
+
   for (const segment of segments) {
     validateSegment(segment, text);
   }

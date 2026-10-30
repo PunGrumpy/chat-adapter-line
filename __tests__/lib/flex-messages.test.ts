@@ -10,6 +10,25 @@ import {
   serializePostbackData,
 } from "../../src/lib/flex-messages.js";
 
+const cardWithButton = (label: string): CardElement => ({
+  children: [
+    { children: [{ id: "btn-1", label, type: "button" }], type: "actions" },
+  ],
+  title: "Pick one",
+  type: "card",
+});
+
+const footerAction = (
+  card: CardElement
+): { displayText: string; label: string } | undefined => {
+  const contents = buildFlexMessage(card).contents as unknown as {
+    footer: {
+      contents: { action: { displayText: string; label: string } }[];
+    };
+  };
+  return contents.footer.contents[0]?.action;
+};
+
 describe("Flex Messages Utility", () => {
   describe("Postback Data Serialization", () => {
     it("should serialize id and value correctly", () => {
@@ -138,6 +157,73 @@ describe("Flex Messages Utility", () => {
       });
     });
 
+    it("keeps a 30 character button label whole", () => {
+      const label = "a".repeat(30);
+
+      expect(footerAction(cardWithButton(label))).toMatchObject({
+        displayText: label,
+        label,
+      });
+    });
+
+    it("cuts a button label at LINE's 40 character limit", () => {
+      expect(footerAction(cardWithButton("a".repeat(45)))?.label).toBe(
+        "a".repeat(40)
+      );
+    });
+
+    it("never leaves half an emoji at the end of a button label", () => {
+      const label = `${"a".repeat(19)}${"👍".repeat(30)}`;
+
+      expect(footerAction(cardWithButton(label))?.label).toBe(
+        `${"a".repeat(19)}${"👍".repeat(21)}`
+      );
+    });
+
+    it("counts a Thai letter with its vowel and tone mark as one character", () => {
+      const twentyFive = "กี่".repeat(25);
+
+      expect(footerAction(cardWithButton(twentyFive))).toMatchObject({
+        displayText: twentyFive,
+        label: twentyFive,
+      });
+      expect(footerAction(cardWithButton("กี่".repeat(45)))?.label).toBe(
+        "กี่".repeat(40)
+      );
+    });
+
+    it("cuts the postback displayText at LINE's 300 character limit", () => {
+      expect(footerAction(cardWithButton("a".repeat(350)))?.displayText).toBe(
+        "a".repeat(300)
+      );
+    });
+
+    it("counts displayText in characters, not UTF-16 code units", () => {
+      expect(footerAction(cardWithButton("👍".repeat(350)))?.displayText).toBe(
+        "👍".repeat(300)
+      );
+    });
+
+    it("cuts a long card title to LINE's 1500 character altText limit", () => {
+      const flexMessage = buildFlexMessage({
+        children: [],
+        title: "a".repeat(2000),
+        type: "card",
+      });
+
+      expect(flexMessage.altText).toBe("a".repeat(1500));
+    });
+
+    it("never leaves half an emoji at the end of the altText", () => {
+      const flexMessage = buildFlexMessage({
+        children: [],
+        title: `${"a".repeat(1499)}${"👍".repeat(10)}`,
+        type: "card",
+      });
+
+      expect(flexMessage.altText).toBe("a".repeat(1499));
+    });
+
     it("leaves a caller-built Flex payload's placeholders alone", () => {
       const flex = {
         altText: `${emoji.wave} hi`,
@@ -216,13 +302,28 @@ describe("Flex Messages Utility", () => {
       ).toThrow(ValidationError);
     });
 
-    it("rejects an altText longer than 400 characters", () => {
+    it("rejects an altText longer than LINE's 1500 characters", () => {
       expect(() =>
-        buildNativeFlexMessage({ altText: "a".repeat(401), contents: bubble })
-      ).toThrow(ValidationError);
+        buildNativeFlexMessage({ altText: "a".repeat(1501), contents: bubble })
+      ).toThrow(/at most 1500/);
       expect(() =>
-        buildNativeFlexMessage({ altText: "a".repeat(400), contents: bubble })
+        buildNativeFlexMessage({ altText: "a".repeat(1500), contents: bubble })
       ).not.toThrow();
+    });
+
+    it("counts altText in UTF-16 code units, as LINE does", () => {
+      expect(() =>
+        buildNativeFlexMessage({
+          altText: "👍".repeat(750),
+          contents: bubble,
+        })
+      ).not.toThrow();
+      expect(() =>
+        buildNativeFlexMessage({
+          altText: "👍".repeat(751),
+          contents: bubble,
+        })
+      ).toThrow(ValidationError);
     });
 
     it("rejects contents that are not a bubble or carousel", () => {

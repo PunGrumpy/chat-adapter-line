@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { lastGraphemeBoundary } from "../../src/lib/graphemes.js";
+import {
+  lastGraphemeBoundary,
+  truncateGraphemes,
+} from "../../src/lib/graphemes.js";
 
 const FAMILY = "👨‍👩‍👧";
 
@@ -32,5 +35,35 @@ describe("lastGraphemeBoundary", () => {
 
   it("returns 0 when the first cluster is longer than the limit", () => {
     expect(lastGraphemeBoundary(`${FAMILY}b`, 4)).toBe(0);
+  });
+});
+
+describe("truncateGraphemes", () => {
+  it("keeps the first characters of text made of single-unit characters", () => {
+    expect(truncateGraphemes("abcdefghij", 4)).toBe("abcd");
+  });
+
+  it("returns text that fits within the limit unchanged", () => {
+    expect(truncateGraphemes("abc", 3)).toBe("abc");
+    expect(truncateGraphemes("abc", 10)).toBe("abc");
+    expect(truncateGraphemes("", 5)).toBe("");
+  });
+
+  it("counts a Thai letter with its vowel and tone mark as one character", () => {
+    expect(truncateGraphemes("กี่".repeat(5), 2)).toBe("กี่กี่");
+  });
+
+  it("counts a joined emoji sequence as one character", () => {
+    expect(truncateGraphemes(`${FAMILY}${FAMILY}${FAMILY}`, 2)).toBe(
+      `${FAMILY}${FAMILY}`
+    );
+  });
+
+  it("counts a surrogate-pair emoji as one character", () => {
+    expect(truncateGraphemes("👍".repeat(5), 3)).toBe("👍👍👍");
+  });
+
+  it("returns an empty string for a limit of 0", () => {
+    expect(truncateGraphemes("abc", 0)).toBe("");
   });
 });

@@ -2,11 +2,7 @@ import { ValidationError } from "@chat-adapter/shared";
 import { describe, expect, it } from "vite-plus/test";
 
 import { MAX_MENTIONS_PER_MESSAGE } from "../../src/lib/mentions.js";
-import {
-  buildTextMessage,
-  MAX_SUBSTITUTIONS_PER_MESSAGE,
-  MAX_TEXT_LENGTH,
-} from "../../src/lib/text-v2.js";
+import { buildTextMessage, MAX_TEXT_LENGTH } from "../../src/lib/text-v2.js";
 
 const PRODUCT_ID = "5ac1bfd5040ab15980c9b435";
 const ENCODED_EMOJI = "{emoji0}";
@@ -269,38 +265,41 @@ describe("buildTextMessage", () => {
     ).toThrow(/overlap/);
   });
 
-  it("rejects more substitutions than LINE accepts", () => {
-    const count = MAX_SUBSTITUTIONS_PER_MESSAGE + 1;
+  it("rejects more than 20 emoji in one message", () => {
     expect(() =>
-      buildTextMessage("$".repeat(count), {
-        emojis: Array.from({ length: count }, (_, index) => ({
+      buildTextMessage("$".repeat(21), {
+        emojis: Array.from({ length: 21 }, (_, index) => ({
           emojiId: "001",
           index,
           productId: PRODUCT_ID,
         })),
       })
-    ).toThrow(ValidationError);
+    ).toThrow(/at most 20 emoji/);
   });
 
-  it("counts mentions and emoji against one substitution budget", () => {
-    const mentionCount = MAX_MENTIONS_PER_MESSAGE;
-    const emojiCount = MAX_SUBSTITUTIONS_PER_MESSAGE - mentionCount + 1;
-    const text = "@".repeat(mentionCount) + "$".repeat(emojiCount);
+  it("accepts 20 mentions and 20 emoji in the same message", () => {
+    const text = `${"@".repeat(20)}${"$".repeat(20)}`;
 
-    expect(() =>
-      buildTextMessage(text, {
-        emojis: Array.from({ length: emojiCount }, (_, offset) => ({
-          emojiId: "001",
-          index: mentionCount + offset,
-          productId: PRODUCT_ID,
-        })),
-        mentions: Array.from({ length: mentionCount }, (_, index) => ({
-          index,
-          length: 1,
-          userId: "U1",
-        })),
-      })
-    ).toThrow(/at most 100/);
+    const message = buildTextMessage(text, {
+      emojis: Array.from({ length: 20 }, (_, offset) => ({
+        emojiId: "001",
+        index: 20 + offset,
+        productId: PRODUCT_ID,
+      })),
+      mentions: Array.from({ length: 20 }, (_, index) => ({
+        index,
+        length: 1,
+        userId: "U1",
+      })),
+    });
+
+    expect(message).toMatchObject({
+      substitution: {
+        emoji19: { type: "emoji" },
+        mention19: { type: "mention" },
+      },
+      type: "textV2",
+    });
   });
 
   it("accepts a plain text of exactly the LINE limit", () => {

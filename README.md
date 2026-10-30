@@ -211,7 +211,7 @@ await thread.post(
 );
 ```
 
-Each `index` must line up with a `$`, both identifiers must be non-empty, and no two substitutions may cover the same characters, whether they are mentions or emoji. LINE accepts at most 100 substitutions in one message. Anything else throws a `ValidationError` before the adapter calls LINE. Like mentions, emoji only work on `text` and `raw` postables, because a Markdown, AST, card, Flex, audio, location, or sticker postable has no stable character offsets to anchor them to.
+Each `index` must line up with a `$`, both identifiers must be non-empty, and no two substitutions may cover the same characters, whether they are mentions or emoji. LINE accepts at most 20 mentions and 20 emoji in one message. Anything else throws a `ValidationError` before the adapter calls LINE. Like mentions, emoji only work on `text` and `raw` postables, because a Markdown, AST, card, Flex, audio, location, or sticker postable has no stable character offsets to anchor them to.
 
 Unlike mentions, emoji render everywhere: 1:1 chats, groups, rooms, and `broadcastMessages()` and `multicastMessages()` all take them.
 
@@ -271,7 +271,7 @@ await thread.post(
 );
 ```
 
-`contents` takes a `bubble` or a `carousel`. `altText` is required and must not be blank. LINE caps it at 400 characters and shows it in notifications and the chat list.
+`contents` takes a `bubble` or a `carousel`. `altText` is required and must not be blank. LINE caps it at 1500 characters and shows it in notifications and the chat list.
 
 The adapter checks the envelope only. LINE validates the component tree itself, and you know which schema level your payload targets.
 

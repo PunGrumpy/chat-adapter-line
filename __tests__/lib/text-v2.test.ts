@@ -2,11 +2,7 @@ import { ValidationError } from "@chat-adapter/shared";
 import { describe, expect, it } from "vite-plus/test";
 
 import { MAX_MENTIONS_PER_MESSAGE } from "../../src/lib/mentions.js";
-import {
-  buildTextMessage,
-  MAX_SUBSTITUTIONS_PER_MESSAGE,
-  MAX_TEXT_LENGTH,
-} from "../../src/lib/text-v2.js";
+import { buildTextMessage, MAX_TEXT_LENGTH } from "../../src/lib/text-v2.js";
 
 const PRODUCT_ID = "5ac1bfd5040ab15980c9b435";
 const ENCODED_EMOJI = "{emoji0}";
@@ -267,40 +263,6 @@ describe("buildTextMessage", () => {
         mentions: [{ index: 0, length: 7, userId: "U1" }],
       })
     ).toThrow(/overlap/);
-  });
-
-  it("rejects more substitutions than LINE accepts", () => {
-    const count = MAX_SUBSTITUTIONS_PER_MESSAGE + 1;
-    expect(() =>
-      buildTextMessage("$".repeat(count), {
-        emojis: Array.from({ length: count }, (_, index) => ({
-          emojiId: "001",
-          index,
-          productId: PRODUCT_ID,
-        })),
-      })
-    ).toThrow(ValidationError);
-  });
-
-  it("counts mentions and emoji against one substitution budget", () => {
-    const mentionCount = MAX_MENTIONS_PER_MESSAGE;
-    const emojiCount = MAX_SUBSTITUTIONS_PER_MESSAGE - mentionCount + 1;
-    const text = "@".repeat(mentionCount) + "$".repeat(emojiCount);
-
-    expect(() =>
-      buildTextMessage(text, {
-        emojis: Array.from({ length: emojiCount }, (_, offset) => ({
-          emojiId: "001",
-          index: mentionCount + offset,
-          productId: PRODUCT_ID,
-        })),
-        mentions: Array.from({ length: mentionCount }, (_, index) => ({
-          index,
-          length: 1,
-          userId: "U1",
-        })),
-      })
-    ).toThrow(/at most 100/);
   });
 
   it("rejects more than 20 emoji in one message", () => {

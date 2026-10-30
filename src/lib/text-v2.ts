@@ -5,8 +5,6 @@ import type { LineTextOptions } from "../types.js";
 import { EMOJI_PLACEHOLDER, normalizeEmojiSegments } from "./emojis.js";
 import { normalizeMentionSegments, toMentionee } from "./mentions.js";
 
-export const MAX_SUBSTITUTIONS_PER_MESSAGE = 100;
-
 /**
  * LINE caps the text of a text message at 5000 characters, counted in UTF-16
  * code units, which is what `String.prototype.length` counts.
@@ -87,13 +85,6 @@ export const buildTextMessage = (
   if (placeholders.length === 0) {
     checkTextLength(text);
     return { text, type: "text", ...quote };
-  }
-
-  if (placeholders.length > MAX_SUBSTITUTIONS_PER_MESSAGE) {
-    throw new ValidationError(
-      "line",
-      `LINE substitutes at most ${MAX_SUBSTITUTIONS_PER_MESSAGE} mentions and emoji per message, got ${placeholders.length}`
-    );
   }
 
   const substitution: Record<string, messagingApi.SubstitutionObject> = {};

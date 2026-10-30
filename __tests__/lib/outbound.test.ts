@@ -1,5 +1,5 @@
 import { ValidationError } from "@chat-adapter/shared";
-import { parseMarkdown } from "chat";
+import { emoji, parseMarkdown } from "chat";
 import { describe, expect, it } from "vite-plus/test";
 
 import { LineFormatConverter } from "../../src/lib/format-converter.js";
@@ -60,6 +60,80 @@ describe("toLineMessages", () => {
     expect(
       toLineMessages({ ast: parseMarkdown("Use `my_var * 2`") }, converter)
     ).toEqual([{ text: "Use my_var * 2", type: "text" }]);
+  });
+
+  it("sends the Chat SDK's emoji placeholders to LINE as Unicode emoji", () => {
+    expect(toLineMessages(`${emoji.thumbs_up} Great job`, converter)).toEqual([
+      { text: "👍 Great job", type: "text" },
+    ]);
+    expect(
+      toLineMessages({ text: `${emoji.thumbs_up} Great job` }, converter)
+    ).toEqual([{ text: "👍 Great job", type: "text" }]);
+    expect(toLineMessages({ raw: `${emoji.fire} hot` }, converter)).toEqual([
+      { text: "🔥 hot", type: "text" },
+    ]);
+    expect(
+      toLineMessages({ markdown: `**${emoji.wave}** hi` }, converter)
+    ).toEqual([{ text: "👋 hi", type: "text" }]);
+    expect(
+      toLineMessages(
+        { ast: parseMarkdown(`${emoji.wave} _hi_ ${emoji.fire}`) },
+        converter
+      )
+    ).toEqual([{ text: "👋 hi 🔥", type: "text" }]);
+  });
+
+  it("converts placeholders when mentions and emojis are empty", () => {
+    expect(
+      toLineMessages(
+        { emojis: [], mentions: [], text: `${emoji.wave} hi` },
+        converter
+      )
+    ).toEqual([{ text: "👋 hi", type: "text" }]);
+  });
+
+  it("rejects placeholders next to positioned mentions or LINE emoji", () => {
+    expect(() =>
+      toLineMessages(
+        {
+          mentions: [{ index: 3, length: 4, userId: "U-a" }],
+          text: `${emoji.wave} @Ann`,
+        },
+        converter
+      )
+    ).toThrow(ValidationError);
+    expect(() =>
+      toLineMessages(
+        {
+          mentions: [{ index: 3, length: 4, userId: "U-a" }],
+          raw: `${emoji.wave} @Ann`,
+        },
+        converter
+      )
+    ).toThrow(/Unicode emoji/);
+    expect(() =>
+      toLineMessages(
+        {
+          emojis: [
+            { emojiId: "001", index: 0, productId: "5ac1bfd5040ab15980c9b435" },
+          ],
+          text: `$ ${emoji.wave}`,
+        },
+        converter
+      )
+    ).toThrow(ValidationError);
+  });
+
+  it("keeps positioned mentions and LINE emoji on text with Unicode emoji", () => {
+    expect(
+      toLineMessages(
+        {
+          mentions: [{ index: 3, length: 4, userId: "U-a" }],
+          text: "👋 @Ann",
+        },
+        converter
+      )
+    ).toMatchObject([{ text: "👋 {mention0}", type: "textV2" }]);
   });
 
   it("converts a card to a flex message", () => {

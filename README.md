@@ -227,6 +227,8 @@ bot.onSubscribedMessage(async (thread, message) => {
 });
 ```
 
+The Chat SDK's `emoji` helper (`emoji.thumbs_up`) is a different, Unicode-based set. The adapter sends it as the Unicode character in text, Markdown, streamed replies, and card text. A `text` or `raw` message with positioned `mentions` or `emojis` must use Unicode emoji directly. Converting a placeholder there would shift those positions, so the adapter throws a `ValidationError`.
+
 ### Flex Messages
 
 A Chat SDK `card` element renders as a single bubble. A `flex` postable covers the rest of the Flex schema, including hero images, carousels, URI and datetime-picker actions, colors, and custom layout. The adapter sends `contents` to LINE untouched:

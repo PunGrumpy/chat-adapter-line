@@ -3,6 +3,7 @@ import type { messagingApi } from "@line/bot-sdk";
 import type { AdapterPostableMessage, Root } from "chat";
 
 import type { LinePostableMessage, LineTextOptions } from "../types.js";
+import { hasSdkEmojiPlaceholder, renderSdkEmoji } from "./emojis.js";
 import { buildFlexMessage, buildNativeFlexMessage } from "./flex-messages.js";
 import type { LineFormatConverter } from "./format-converter.js";
 import { isRecord } from "./is-record.js";
@@ -81,6 +82,27 @@ const rejectMentionsAndEmoji = (
   }
 };
 
+const renderTextWithSdkEmoji = (
+  text: string,
+  options: LineTextOptions
+): string => {
+  if (!hasSdkEmojiPlaceholder(text)) {
+    return text;
+  }
+
+  if (
+    (options.mentions?.length ?? 0) > 0 ||
+    (options.emojis?.length ?? 0) > 0
+  ) {
+    throw new ValidationError(
+      "line",
+      "Use Unicode emoji instead of the SDK's emoji placeholders in a message with positioned mentions or LINE emoji"
+    );
+  }
+
+  return renderSdkEmoji(text);
+};
+
 /**
  * Converts one postable into LINE Messaging API message objects.
  *
@@ -95,7 +117,7 @@ export const toLineMessages = (
   converter: LineFormatConverter
 ): messagingApi.Message[] => {
   if (typeof message === "string") {
-    return [buildTextMessage(message)];
+    return [buildTextMessage(renderSdkEmoji(message))];
   }
 
   if (!isRecord(message)) {
@@ -147,11 +169,15 @@ export const toLineMessages = (
   }
 
   if (typeof message.text === "string") {
-    return [buildTextMessage(message.text, options)];
+    return [
+      buildTextMessage(renderTextWithSdkEmoji(message.text, options), options),
+    ];
   }
 
   if (typeof message.raw === "string") {
-    return [buildTextMessage(message.raw, options)];
+    return [
+      buildTextMessage(renderTextWithSdkEmoji(message.raw, options), options),
+    ];
   }
 
   if (typeof message.markdown === "string") {

@@ -1,3 +1,4 @@
+import { emoji } from "chat";
 import { describe, expect, it } from "vite-plus/test";
 
 import { toPlainText } from "../../src/lib/to-plain-text.js";
@@ -177,5 +178,10 @@ describe("toPlainText", () => {
 
   it("keeps inline HTML as written", () => {
     expect(toPlainText("<b>hi</b> there")).toBe("<b>hi</b> there");
+  });
+
+  it("renders the Chat SDK's emoji placeholders as Unicode emoji", () => {
+    expect(toPlainText(`${emoji.fire} hot`)).toBe("🔥 hot");
+    expect(toPlainText(`**${emoji.wave}** hi`)).toBe("👋 hi");
   });
 });

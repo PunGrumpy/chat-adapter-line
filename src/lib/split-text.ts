@@ -1,6 +1,10 @@
+import { lastGraphemeBoundary } from "./graphemes.js";
+
 const SEPARATORS = ["\n\n", "\n", " "] as const;
 
 const MAX_SINGLE_UNIT_CODE_POINT = 65_535;
+
+const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
 
 interface Break {
   end: number;
@@ -10,6 +14,17 @@ interface Break {
 const startsSurrogatePair = (text: string, index: number): boolean =>
   (text.codePointAt(index) ?? 0) > MAX_SINGLE_UNIT_CODE_POINT;
 
+const lastWordBoundary = (text: string, limit: number): number => {
+  let boundary = 0;
+  for (const { index } of wordSegmenter.segment(text)) {
+    if (index > limit) {
+      break;
+    }
+    boundary = index;
+  }
+  return boundary;
+};
+
 const findBreak = (text: string, limit: number): Break => {
   const minPartLength = limit / 2;
 
@@ -18,6 +33,16 @@ const findBreak = (text: string, limit: number): Break => {
     if (index >= minPartLength) {
       return { end: index, nextStart: index + separator.length };
     }
+  }
+
+  const wordEnd = lastWordBoundary(text, limit);
+  if (wordEnd >= minPartLength) {
+    return { end: wordEnd, nextStart: wordEnd };
+  }
+
+  const graphemeEnd = lastGraphemeBoundary(text, limit);
+  if (graphemeEnd > 0) {
+    return { end: graphemeEnd, nextStart: graphemeEnd };
   }
 
   const end =

@@ -82,6 +82,15 @@ describe("splitText", () => {
     ]);
   });
 
+  it("still makes progress through a cluster longer than the limit", () => {
+    const text = `e${COMBINING_ACUTE.repeat(12)}`;
+    const parts = splitText(text, 5);
+
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.join("")).toBe(text);
+    expect(parts.every((part) => part.length <= 5)).toBe(true);
+  });
+
   it("splits Thai text without spaces inside every letter cluster", () => {
     const text = "สวัสดีครับยินดีต้อนรับ".repeat(20);
     const parts = splitText(text, 50);

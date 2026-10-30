@@ -3,12 +3,13 @@ import type { messagingApi } from "@line/bot-sdk";
 import type { ButtonElement, CardElement } from "chat";
 
 import { renderSdkEmoji } from "./emojis.js";
+import { lastGraphemeBoundary, truncateGraphemes } from "./graphemes.js";
 import { isRecord } from "./is-record.js";
 
 const MAX_POSTBACK_DATA_LENGTH = 300;
-const MAX_BUTTON_LABEL_LENGTH = 20;
-const MAX_ACTION_DISPLAY_TEXT_LENGTH = 300;
-const MAX_ALT_TEXT_LENGTH = 400;
+const MAX_BUTTON_LABEL_GRAPHEMES = 40;
+const MAX_ACTION_DISPLAY_TEXT_GRAPHEMES = 300;
+const MAX_ALT_TEXT_LENGTH = 1500;
 
 /**
  * Serializes a button ID and value into a URL-encoded string.
@@ -106,8 +107,8 @@ const buildFooterButton = (
   return {
     action: {
       data: serializePostbackData(button.id, button.value),
-      displayText: label.slice(0, MAX_ACTION_DISPLAY_TEXT_LENGTH),
-      label: label.slice(0, MAX_BUTTON_LABEL_LENGTH),
+      displayText: truncateGraphemes(label, MAX_ACTION_DISPLAY_TEXT_GRAPHEMES),
+      label: truncateGraphemes(label, MAX_BUTTON_LABEL_GRAPHEMES),
       type: "postback",
     },
     style: button.style === "primary" ? "primary" : "secondary",
@@ -145,7 +146,8 @@ const buildFooterContents = (card: CardElement): messagingApi.FlexButton[] => {
  * buttons inside actions become the bubble footer as postback actions.
  * Other elements, and buttons without an ID, are left out. A card with no
  * body gets the text "Empty Card", and a card with no title gets
- * "Flex Message" as its notification text.
+ * "Flex Message" as its notification text. A title longer than LINE's
+ * 1500-character limit is cut for that text without splitting a character.
  */
 export const buildFlexMessage = (
   card: CardElement
@@ -175,8 +177,10 @@ export const buildFlexMessage = (
     };
   }
 
+  const title = renderSdkEmoji(card.title || "Flex Message");
+
   return {
-    altText: renderSdkEmoji(card.title || "Flex Message"),
+    altText: title.slice(0, lastGraphemeBoundary(title, MAX_ALT_TEXT_LENGTH)),
     contents: bubble,
     type: "flex",
   };

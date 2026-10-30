@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
+  AdapterError,
   AdapterRateLimitError,
   PermissionError,
   ValidationError,
@@ -49,7 +50,7 @@ const mocks = vi.hoisted(() => {
     broadcastWithHttpInfo: vi.fn(),
     getBotInfo: vi.fn(),
     getGroupSummary: vi.fn(),
-    getMessageContent: vi.fn(),
+    getMessageContentWithHttpInfo: vi.fn(),
     getProfile: vi.fn(),
     multicastWithHttpInfo: vi.fn(),
     pushMessage: vi.fn(),
@@ -63,7 +64,7 @@ vi.mock("@line/bot-sdk", () => {
     broadcastWithHttpInfo = mocks.broadcastWithHttpInfo;
     getBotInfo = mocks.getBotInfo;
     getGroupSummary = mocks.getGroupSummary;
-    getMessageContent = mocks.getMessageContent;
+    getMessageContentWithHttpInfo = mocks.getMessageContentWithHttpInfo;
     getProfile = mocks.getProfile;
     multicastWithHttpInfo = mocks.multicastWithHttpInfo;
     pushMessage = mocks.pushMessage;
@@ -1642,30 +1643,34 @@ describe("LineAdapter", () => {
     });
 
     it("still fetches content lazily through the LINE client", async () => {
-      mocks.getMessageContent.mockResolvedValue(
-        Readable.from([Buffer.from("file-bytes")])
-      );
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([Buffer.from("file-bytes")]),
+        httpResponse: new Response(null, { status: 200 }),
+      });
       const event = makeEvent({
         message: { fileName: "report.pdf", id: "file-1", type: "file" },
       } as never);
       const [attachment] = adapter.parseMessage(event).attachments;
 
-      expect(mocks.getMessageContent).not.toHaveBeenCalled();
+      expect(mocks.getMessageContentWithHttpInfo).not.toHaveBeenCalled();
 
       const data = await attachment.fetchData?.();
 
-      expect(mocks.getMessageContent).toHaveBeenCalledWith("file-1");
+      expect(mocks.getMessageContentWithHttpInfo).toHaveBeenCalledWith(
+        "file-1"
+      );
       expect(data?.toString()).toBe("file-bytes");
     });
 
     it("joins content that arrives in several chunks", async () => {
-      mocks.getMessageContent.mockResolvedValue(
-        Readable.from([
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([
           Buffer.from("part-1|"),
           Buffer.from("part-2|"),
           "part-3",
-        ])
-      );
+        ]),
+        httpResponse: new Response(null, { status: 200 }),
+      });
       const event = makeEvent({
         message: { id: "img-9", type: "image" },
       } as never);
@@ -1677,7 +1682,9 @@ describe("LineAdapter", () => {
     });
 
     it("maps a rate-limited content download to AdapterRateLimitError", async () => {
-      mocks.getMessageContent.mockRejectedValue(makeRateLimitError(7));
+      mocks.getMessageContentWithHttpInfo.mockRejectedValue(
+        makeRateLimitError(7)
+      );
       const event = makeEvent({
         message: { id: "img-429", type: "image" },
       } as never);
@@ -1686,6 +1693,61 @@ describe("LineAdapter", () => {
       await expect(attachment.fetchData?.()).rejects.toBeInstanceOf(
         AdapterRateLimitError
       );
+    });
+
+    it("rejects with CONTENT_NOT_READY while LINE is still preparing the content", async () => {
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([]),
+        httpResponse: new Response(null, { status: 202 }),
+      });
+      const event = makeEvent({
+        message: { id: "vid-202", type: "video" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      const rejection = await attachment
+        .fetchData?.()
+        .catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(AdapterError);
+      expect(rejection).toMatchObject({
+        adapter: "line",
+        code: "CONTENT_NOT_READY",
+        message: expect.stringContaining("video"),
+      });
+    });
+
+    it("resolves with the bytes once LINE has finished preparing the content", async () => {
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([Buffer.from("video-bytes")]),
+        httpResponse: new Response(null, { status: 200 }),
+      });
+      const event = makeEvent({
+        message: { id: "vid-200", type: "video" },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      const data = await attachment.fetchData?.();
+
+      expect(data?.toString()).toBe("video-bytes");
+    });
+
+    it("leaves fetchData unset for a file the sender's app hosts", () => {
+      const event = makeEvent({
+        message: {
+          contentProvider: {
+            originalContentUrl: "https://example.com/original.jpg",
+            previewImageUrl: "https://example.com/preview.jpg",
+            type: "external",
+          },
+          id: "img-ext",
+          type: "image",
+        },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+
+      expect(attachment.fetchData).toBeUndefined();
+      expect(attachment.url).toBe("https://example.com/original.jpg");
     });
 
     it("drops the attachment when a media message carries no ID", () => {

@@ -1,6 +1,7 @@
-import { extractCard, ValidationError } from "@chat-adapter/shared";
+import { ValidationError } from "@chat-adapter/shared";
 import type { messagingApi } from "@line/bot-sdk";
-import type { AdapterPostableMessage, Root } from "chat";
+import type { AdapterPostableMessage, CardElement, Root } from "chat";
+import { isCardElement } from "chat";
 
 import type { LinePostableMessage, LineTextOptions } from "../types.js";
 import { hasSdkEmojiPlaceholder, renderSdkEmoji } from "./emojis.js";
@@ -132,7 +133,9 @@ export const toLineMessages = (
     return [buildNativeFlexMessage(message.flex)];
   }
 
-  const card = extractCard(message as AdapterPostableMessage);
+  const card = isCardElement(message)
+    ? message
+    : (message.card as CardElement | undefined);
   if (card) {
     rejectQuote(options, "card");
     rejectMentionsAndEmoji(options, "card");

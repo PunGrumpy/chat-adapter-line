@@ -241,7 +241,7 @@ The Chat SDK's `emoji` helper (`emoji.thumbs_up`) is a different, Unicode-based 
 
 ### Flex Messages
 
-A Chat SDK `card` element renders as a single bubble. A `flex` postable covers the rest of the Flex schema, including hero images, carousels, URI and datetime-picker actions, colors, and custom layout. The adapter sends `contents` to LINE untouched:
+A Chat SDK `card` element renders as a single bubble, with every card element in it, from fields and tables to charts and link buttons. A `flex` postable covers the rest of the Flex schema, including carousels, URI and datetime-picker actions, colors, and custom layout. The adapter sends `contents` to LINE untouched:
 
 ```typescript
 await thread.post(
@@ -309,6 +309,42 @@ bot.onAction("delivery-day", async (event) => {
   await event.thread?.post(`Delivering on ${event.value}`);
 });
 ```
+
+### Generative UI with json-render
+
+[`@json-render/chat`](https://vercel.com/changelog/json-render-and-chat-sdk-agents) turns a model's JSON spec into a Chat SDK card, and the adapter sends that card as a Flex Message. json-render needs `chat` 4.43.0 or later. Titles, subtitles, images, text, fields, dividers, tables, charts, and buttons all render in the bubble. A table becomes a grid of rows, and a chart becomes its title over a table of its values, because LINE has no chart component. A link button opens its URL, and a button marked `disabled` is left out, because LINE has no disabled state.
+
+`streamCard()` posts a partial card and then edits it as the model writes. LINE cannot edit a sent message, so the first edit rejects with `NotImplementedError` after a half-built card has already gone out. Pass an `updateIntervalMs` of `Infinity` instead. `streamCard()` then skips every partial card and posts the finished one once:
+
+```typescript
+import { defineCatalog } from "@json-render/core";
+import {
+  schema,
+  standardComponentDefinitions,
+  streamCard,
+} from "@json-render/chat";
+import { streamText } from "ai";
+
+const catalog = defineCatalog(schema, {
+  components: standardComponentDefinitions,
+});
+
+bot.onDirectMessage(async (thread, message) => {
+  await thread.startTyping();
+  const result = streamText({
+    model: "anthropic/claude-haiku-5.5",
+    prompt: message.text,
+    system: catalog.prompt(),
+  });
+  await streamCard(thread, result.textStream, {
+    updateIntervalMs: Number.POSITIVE_INFINITY,
+  });
+});
+```
+
+If the finished spec is invalid, `streamCard()` throws a `CardSpecError` before anything is sent, so the reply token is still unused and you can retry. In a 1:1 chat, `startTyping()` shows LINE's loading animation while the model writes.
+
+LINE does not cap rows or columns, but a phone-width bubble gets hard to read, and LINE rejects a bubble whose JSON is too large. Pass `limits` in the same options to have json-render reject an oversized spec, for example `{ tableColumns: 4, tableRows: 20 }`.
 
 ### Inbound media
 

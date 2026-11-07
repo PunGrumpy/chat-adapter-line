@@ -838,6 +838,55 @@ describe("Flex Messages Utility", () => {
       expect(bubble.footer?.contents).toHaveLength(1);
     });
 
+    it("keeps every value of a chart whose categories repeat", () => {
+      const json = JSON.stringify(
+        buildFlexMessage({
+          children: [
+            {
+              chart: {
+                categories: ["Q", "Q"],
+                series: [
+                  {
+                    data: [
+                      { label: "Q", value: 1 },
+                      { label: "Q", value: 2 },
+                    ],
+                    name: "s",
+                  },
+                ],
+                type: "bar",
+              },
+              title: "Twice",
+              type: "chart",
+            },
+          ] as unknown as CardChild[],
+          type: "card",
+        }).contents
+      );
+
+      expect(json).toContain('"text":"1"');
+      expect(json).toContain('"text":"2"');
+    });
+
+    it("falls back to Flex Message when the card's text is only whitespace", () => {
+      const message = buildFlexMessage({
+        children: [{ content: " ", type: "text" }],
+        type: "card",
+      });
+
+      expect(message.altText).toBe("Flex Message");
+    });
+
+    it("falls back to Flex Message when the first character alone is over 1500 units", () => {
+      const message = buildFlexMessage({
+        children: [],
+        title: `a${"\u0301".repeat(1600)}`,
+        type: "card",
+      });
+
+      expect(message.altText).toBe("Flex Message");
+    });
+
     it("shows Empty Card only when the card has nothing at all", () => {
       expect(bodyTexts({ children: [], type: "card" })).toEqual(["Empty Card"]);
       expect(buildFlexMessage({ children: [], type: "card" }).altText).toBe(

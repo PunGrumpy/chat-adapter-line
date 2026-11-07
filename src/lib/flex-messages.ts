@@ -230,10 +230,14 @@ const toChartGrid = (chart: ChartNode["chart"]): Grid => {
     align: ["left", ...chart.series.map((): ColumnAlignment => "right")],
     headers: [chart.xLabel ?? "", ...chart.series.map(({ name }) => name)],
     note: chart.yLabel,
-    rows: chart.categories.map((category) => [
+    rows: chart.categories.map((category, index) => [
       category,
       ...chart.series.map(({ data }) => {
-        const point = data.find(({ label }) => label === category);
+        // Categories may repeat, so a point is matched by position first.
+        const point =
+          data[index]?.label === category
+            ? data[index]
+            : data.find(({ label }) => label === category);
         return point === undefined ? "" : String(point.value);
       }),
     ]),
@@ -448,10 +452,15 @@ const buildAltText = (card: CardElement): string => {
     card.title,
     card.subtitle,
     ...card.children.map((child) => cardChildToFallbackText(child)),
-  ].filter(isNonEmptyString);
-  const text = renderSdkEmoji(parts.join("\n")) || "Flex Message";
+  ]
+    .map((part) => part?.trim())
+    .filter(isNonEmptyString);
+  const text = renderSdkEmoji(parts.join("\n"));
 
-  return text.slice(0, lastGraphemeBoundary(text, MAX_ALT_TEXT_LENGTH));
+  return (
+    text.slice(0, lastGraphemeBoundary(text, MAX_ALT_TEXT_LENGTH)) ||
+    "Flex Message"
+  );
 };
 
 /**

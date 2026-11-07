@@ -22,7 +22,7 @@ const isHttpsUrl = (value: string): boolean => {
   }
 };
 
-const readContentUrl = (value: unknown, field: string): string => {
+export const readContentUrl = (value: unknown, field: string): string => {
   if (typeof value !== "string" || !isHttpsUrl(value)) {
     throw new ValidationError("line", `${field} must be an HTTPS URL`);
   }

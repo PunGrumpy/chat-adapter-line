@@ -643,6 +643,69 @@ describe("Flex Messages Utility", () => {
       ]);
     });
 
+    it("renders an inline link as tappable text, labelled by its URL when it has no label", () => {
+      const bubble = bubbleOf({
+        children: [
+          { label: "Pricing", type: "link", url: "https://example.com/p" },
+          {
+            children: [
+              { label: "", type: "link-button", url: "https://example.com/d" },
+            ],
+            type: "actions",
+          },
+        ],
+        type: "card",
+      });
+
+      expect(bubble.body?.contents[0]).toMatchObject({
+        action: { label: "Pricing", type: "uri", uri: "https://example.com/p" },
+        text: "Pricing",
+        type: "text",
+      });
+      expect(bubble.footer?.contents[0]).toMatchObject({
+        action: { label: "https://example.com/d", type: "uri" },
+      });
+    });
+
+    it("never sends an empty text component, which LINE rejects", () => {
+      const message = buildFlexMessage({
+        children: [
+          { content: "", type: "text" },
+          { children: [{ label: "Owner", value: "" }], type: "fields" },
+          {
+            chart: { segments: [{ label: "A", value: 1 }], type: "pie" },
+            title: "",
+            type: "chart",
+          },
+        ] as unknown as CardChild[],
+        title: "Report",
+        type: "card",
+      });
+
+      const texts: string[] = [];
+      const collect = (node: unknown): void => {
+        if (Array.isArray(node)) {
+          for (const item of node) {
+            collect(item);
+          }
+        } else if (node !== null && typeof node === "object") {
+          const record = node as Record<string, unknown>;
+          if (record.type === "text") {
+            texts.push(String(record.text));
+          }
+          for (const value of Object.values(record)) {
+            collect(value);
+          }
+        }
+      };
+      collect(message.contents);
+
+      expect(texts).not.toContain("");
+      expect(texts).toEqual(
+        expect.arrayContaining(["Report", "Owner", "A", "1", "100%"])
+      );
+    });
+
     it("rejects a link button URL LINE would not open", () => {
       expect(() =>
         buildFlexMessage(cardWithUrl("ftp://example.com/x"))
@@ -746,17 +809,6 @@ describe("Flex Messages Utility", () => {
 
       expect(message.altText).toBe(`${"a".repeat(1499)}\n`);
       expect(message.altText.length).toBe(1500);
-    });
-
-    it("renders a child it has no layout for as its fallback text", () => {
-      const texts = bodyTexts({
-        children: [
-          { label: "Docs", type: "link", url: "https://example.com/docs" },
-        ],
-        type: "card",
-      });
-
-      expect(texts).toEqual(["Docs (https://example.com/docs)"]);
     });
 
     it("drops a child with no fallback text instead of showing Empty Card", () => {

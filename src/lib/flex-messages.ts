@@ -21,6 +21,7 @@ const URI_ACTION_PROTOCOLS: ReadonlySet<string> = new Set([
   "tel:",
 ]);
 const MUTED_COLOR = "#8C8C8C";
+const LINK_COLOR = "#1E6FD9";
 
 /**
  * `chat` 4.17.0's `CardChild` has no chart, so the chart shape is declared
@@ -33,6 +34,7 @@ type ActionChild = Extract<
 >["children"][number];
 type ButtonNode = Extract<ActionChild, { type: "button" }>;
 type LinkButtonNode = Extract<ActionChild, { type: "link-button" }>;
+type LinkNode = Extract<CardChildNode, { type: "link" }>;
 type TableNode = Extract<CardChildNode, { type: "table" }>;
 type ColumnAlignment = NonNullable<TableNode["align"]>[number];
 
@@ -127,13 +129,20 @@ const COLUMN_ALIGNMENT: Readonly<
   Record<ColumnAlignment, messagingApi.FlexText.AlignEnum>
 > = { center: "center", left: "start", right: "end" };
 
-const toGridCell = (
+/** LINE rejects a text component with empty text, so a filler holds its place. */
+const toTextOrFiller = (
   text: string,
   options: FlexTextOptions
 ): messagingApi.FlexComponent =>
   text === ""
-    ? { flex: 1, type: "filler" }
-    : toFlexText(text, { flex: 1, size: "sm", ...options });
+    ? { flex: options.flex ?? 1, type: "filler" }
+    : toFlexText(text, options);
+
+const toGridCell = (
+  text: string,
+  options: FlexTextOptions
+): messagingApi.FlexComponent =>
+  toTextOrFiller(text, { flex: 1, size: "sm", ...options });
 
 const toGridRow = (
   cells: string[],
@@ -284,18 +293,29 @@ const toPostbackButton = (
   };
 };
 
+const toUriAction = (label: string, url: string): messagingApi.URIAction => ({
+  label: truncateGraphemes(
+    renderSdkEmoji(label || url),
+    MAX_BUTTON_LABEL_GRAPHEMES
+  ),
+  type: "uri",
+  uri: readLinkUrl(url),
+});
+
 const toLinkButton = (button: LinkButtonNode): messagingApi.FlexButton => ({
-  action: {
-    label: truncateGraphemes(
-      renderSdkEmoji(button.label),
-      MAX_BUTTON_LABEL_GRAPHEMES
-    ),
-    type: "uri",
-    uri: readLinkUrl(button.url),
-  },
+  action: toUriAction(button.label, button.url),
   style: toButtonStyle(button.style),
   type: "button",
 });
+
+const toLinkText = (link: LinkNode): messagingApi.FlexText =>
+  toFlexText(link.label || link.url, {
+    action: toUriAction(link.label, link.url),
+    color: LINK_COLOR,
+    decoration: "underline",
+    margin: "md",
+    size: "md",
+  });
 
 const toFooterButton = (
   action: ActionChild
@@ -316,6 +336,9 @@ const toFooterButton = (
 const renderNode = (node: CardNode, blocks: BubbleBlocks): void => {
   switch (node.type) {
     case "text": {
+      if (!isNonEmptyString(node.content)) {
+        return;
+      }
       blocks.body.push(
         toFlexText(node.content, {
           margin: "md",
@@ -323,6 +346,10 @@ const renderNode = (node: CardNode, blocks: BubbleBlocks): void => {
           ...TEXT_STYLE_OPTIONS[node.style ?? ""],
         })
       );
+      return;
+    }
+    case "link": {
+      blocks.body.push(toLinkText(node));
       return;
     }
     case "section": {
@@ -349,8 +376,8 @@ const renderNode = (node: CardNode, blocks: BubbleBlocks): void => {
       for (const field of node.children) {
         blocks.body.push({
           contents: [
-            toFlexText(field.label, { ...MUTED_TEXT, flex: 2 }),
-            toFlexText(field.value, { flex: 5, size: "sm" }),
+            toTextOrFiller(field.label, { ...MUTED_TEXT, flex: 2 }),
+            toTextOrFiller(field.value, { flex: 5, size: "sm" }),
           ],
           layout: "baseline",
           margin: "sm",
@@ -372,10 +399,12 @@ const renderNode = (node: CardNode, blocks: BubbleBlocks): void => {
       return;
     }
     case "chart": {
-      blocks.body.push(
-        toFlexText(node.title, { margin: "md", size: "md", weight: "bold" }),
-        ...toGridComponents(toChartGrid(node.chart))
-      );
+      if (isNonEmptyString(node.title)) {
+        blocks.body.push(
+          toFlexText(node.title, { margin: "md", size: "md", weight: "bold" })
+        );
+      }
+      blocks.body.push(...toGridComponents(toChartGrid(node.chart)));
       return;
     }
     case "actions": {
@@ -430,7 +459,7 @@ const buildAltText = (card: CardElement): string => {
  *
  * The card's `imageUrl` becomes the bubble hero. The title, subtitle, and
  * every child, sections included, fill the body: text keeps its bold or
- * muted style, dividers become separators, images become Flex images,
+ * muted style, links become tappable text, dividers become separators, images become Flex images,
  * fields become label and value rows, and tables and charts become grids of
  * equal-width columns. Buttons anywhere in the card become the footer, as
  * postback actions or, for link buttons, URI actions; disabled buttons and

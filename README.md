@@ -543,11 +543,11 @@ This package includes targeted benchmarks for hot paths:
 Run benchmarks:
 
 ```bash
-vp run benchmark
+bun run benchmark
 ```
 
 Export JSON results:
 
 ```bash
-vp run benchmark:json
+bun run benchmark:json
 ```

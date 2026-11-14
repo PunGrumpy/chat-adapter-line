@@ -9,6 +9,7 @@ import {
   AdapterRateLimitError,
   ValidationError,
 } from "@chat-adapter/shared";
+import { LineBotClient } from "@line/bot-sdk";
 import { deriveChannelId, NotImplementedError, parseMarkdown } from "chat";
 import {
   afterEach,
@@ -334,6 +335,39 @@ describe("LineAdapter", () => {
       ["a blank access token", { ...validConfig, channelAccessToken: " \n" }],
     ])("refuses %s at construction", (_label, config) => {
       expect(() => new LineAdapter(config)).toThrow(ValidationError);
+    });
+  });
+
+  describe("padded credentials", () => {
+    it("accepts a webhook signed with the channel secret without its surrounding whitespace", async () => {
+      const paddedAdapter = new LineAdapter({
+        channelAccessToken: " test-token\n",
+        channelSecret: "test-secret\n",
+      });
+      const body = JSON.stringify({ destination: "ch-123", events: [] });
+
+      const response = await paddedAdapter.handleWebhook(
+        makeRequest(body, generateSignature(body, "test-secret"))
+      );
+
+      expect(response.status).toBe(200);
+    });
+
+    it("sends the access token to LINE without its surrounding whitespace", () => {
+      const fromChannelAccessToken = vi.mocked(
+        LineBotClient.fromChannelAccessToken
+      );
+      fromChannelAccessToken.mockClear();
+
+      const paddedAdapter = new LineAdapter({
+        channelAccessToken: " test-token\n",
+        channelSecret: "test-secret",
+      });
+
+      expect(paddedAdapter.name).toBe("line");
+      expect(fromChannelAccessToken).toHaveBeenCalledWith({
+        channelAccessToken: "test-token",
+      });
     });
   });
 

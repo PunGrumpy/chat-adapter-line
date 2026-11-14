@@ -229,7 +229,7 @@ const requireCredential = (
     );
   }
 
-  return value;
+  return value.trim();
 };
 
 export class LineAdapter implements Adapter<LineThreadId, LineEvent> {

@@ -13,12 +13,12 @@ The source code is hosted on GitHub at [PunGrumpy/chat-adapter-line](https://git
 3. Install dependencies: `bun install`
 4. Create a new branch for your feature or bug fix: `git checkout -b feature/your-feature-name`
 5. Make your changes
-6. Run tests: `bun test`
+6. Run tests: `bun run test`
 7. Ensure code quality:
-   - Typecheck: `bun typecheck`
-   - Lint: `bun lint`
-   - Format: `bun format`
-8. Build the package: `bun build`
+   - Typecheck: `bun run typecheck`
+   - Lint: `bun run lint`
+   - Format: `bun run format`
+8. Build the package: `bun run build`
 9. Commit your changes with clear, descriptive commit messages
 10. Push to your fork
 11. Submit a Pull Request
@@ -27,7 +27,7 @@ The source code is hosted on GitHub at [PunGrumpy/chat-adapter-line](https://git
 
 We use [Changesets](https://github.com/changesets/changesets) to manage versions and changelogs. When you make changes that should be released, you need to create a changeset:
 
-1. Run `bun changeset` in the root directory
+1. Run `bun run changeset` in the root directory
 2. Choose the appropriate version bump:
    - `patch` - Bug fixes and minor changes
    - `minor` - New features that don't break existing functionality
@@ -58,19 +58,22 @@ We use [Changesets](https://github.com/changesets/changesets) to manage versions
 - Follow existing code style and conventions
 - Include tests if applicable
 - **Add a changeset if your changes affect the published package**
-- Ensure all checks pass: `bun test`, `bun lint`, and `bun typecheck`
+- Ensure all checks pass: `bun run test`, `bun run lint`, and `bun run typecheck`
 - Write clear commit messages
 
 ## Development Commands
 
 From the root directory, you can run:
 
-- `bun dev` - Build package in watch mode
-- `bun build` - Build package for production
-- `bun test` - Run tests using Vite Plus Test
-- `bun lint` - Run Ultracite linter (`bun x ultracite check`)
-- `bun format` - Auto-fix linting/formatting issues (`bun x ultracite fix`)
-- `bun typecheck` - Run TypeScript type checking (`tsc --noEmit`)
+- `bun run dev` - Build package in watch mode
+- `bun run build` - Build package for production
+- `bun run test` - Run tests using Vite Plus Test
+- `bun run lint` - Run Ultracite linter (`bun x ultracite check`)
+- `bun run format` - Auto-fix linting/formatting issues (`bun x ultracite fix`)
+- `bun run typecheck` - Run TypeScript type checking (`tsc --noEmit`)
+- `bun run benchmark` - Run the benchmarks in `bench/`
+
+Use `bun run`, not the bare `bun test` or `bun build`. Those run Bun's own test runner and bundler instead of the project's scripts, and they fail.
 
 ## Reporting Issues and Discussions
 

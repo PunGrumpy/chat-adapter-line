@@ -9,7 +9,7 @@ The source code is hosted on GitHub at [PunGrumpy/chat-adapter-line](https://git
 ## Getting Started
 
 1. Fork the repository on GitHub
-2. Clone your fork: `git clone https://github.com/PunGrumpy/chat-adapter-line.git`
+2. Clone your fork: `git clone https://github.com/<your-username>/chat-adapter-line.git`
 3. Install dependencies: `bun install`
 4. Create a new branch for your feature or bug fix: `git checkout -b feature/your-feature-name`
 5. Make your changes
@@ -84,7 +84,7 @@ Use the GitHub [issue tracker](https://github.com/PunGrumpy/chat-adapter-line/is
 
 ### Feature Requests and Discussions
 
-For potential changes, feature requests, or general discussions, please open a [discussion](https://github.com/PunGrumpy/chat-adapter-line/discussions) on GitHub or open an issue.
+For potential changes, feature requests, or general discussions, please open an [issue](https://github.com/PunGrumpy/chat-adapter-line/issues).
 
 ## Code of Conduct
 

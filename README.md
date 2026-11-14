@@ -113,7 +113,7 @@ bot.onSubscribedMessage(async (thread, message) => {
 
 ### Typing indicator
 
-`thread.startTyping()` shows LINE's loading animation in a 1:1 chat for up to 20 seconds, or until the bot's next message arrives. LINE has no typing indicator in groups or rooms, so the call does nothing there. A failed request is logged at debug level and never throws. While `thread.post()` collects a stream, the adapter renews the animation until the stream ends.
+`thread.startTyping()` shows LINE's loading animation in a 1:1 chat for up to 20 seconds, or until the bot's next message arrives. LINE has no typing indicator in groups or rooms, so the call does nothing there. The call returns without waiting for LINE, so your handler starts its real work at once. The bot's next message waits for the request, so the animation never reappears after the reply. A failed request is logged at debug level and never throws. While `thread.post()` collects a stream, the adapter renews the animation until the stream ends.
 
 ### What LINE cannot do
 

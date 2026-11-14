@@ -506,6 +506,20 @@ LINE issues a reply token with `follow`, `join`, and `memberJoined`, and the ada
 
 Two behaviors differ from message delivery on purpose. A redelivered lifecycle event is still delivered, with `isRedelivery` set, because a missed `unfollow` cannot be recovered the way a missed message can be resent. A standby-mode event is delivered too, with `mode` set to `standby`. Filter on those fields, and deduplicate on `webhookEventId`, which is unique per event. LINE keeps the same ID when it redelivers an event.
 
+#### Welcoming members with `onMemberJoinedChannel`
+
+A `join` and a `memberJoined` event also reach the Chat SDK's cross-platform `onMemberJoinedChannel()`, so a welcome written for Slack or Teams works on LINE too:
+
+```typescript
+bot.onMemberJoinedChannel(async (event) => {
+  await bot.channel(event.channelId).post("Welcome!");
+});
+```
+
+`memberJoined` calls the handler once for each new member, with that member's `userId`. A member LINE does not identify is skipped. `join`, which LINE sends when the bot is added to a group or room, calls it once with the bot's own ID as `userId`, as Slack does. Compare it with `event.adapter.botUserId` to tell the bot from a person. LINE sends no inviter, so `inviterId` is never set. Each group or room is its own channel, so `event.channelId` names that conversation.
+
+The reply token travels with the event, so the welcome goes out over the free Reply API. Unlike `onLifecycleEvent()`, this handler never sees a redelivered or standby-mode event, because the Chat SDK does not deduplicate and a repeated welcome annoys people. `leave` and `memberLeft` are not routed, so use `onLifecycleEvent()` for them.
+
 ### Broadcast and multicast
 
 `broadcastMessages()` sends to every follower of the channel and `multicastMessages()` sends to up to 500 user IDs. Both accept a single postable or an array of up to five, reuse the same conversion as `postMessage()`, and never consume a reply token:

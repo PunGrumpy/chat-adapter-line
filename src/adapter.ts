@@ -252,6 +252,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     { info: ThreadInfo; expires: number }
   >();
   private loadingAnimationShownAt = new Map<string, number>();
+  private loadingAnimationsInFlight = new Map<string, Promise<void>>();
   private replyTokens = new ReplyTokenStore();
   private lifecycleHandlers = new Set<LineLifecycleHandler>();
 
@@ -768,6 +769,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     sourceId: string,
     messages: messagingApi.Message[]
   ): Promise<SendResult> {
+    await this.settleLoadingAnimation(threadId);
     this.loadingAnimationShownAt.delete(threadId);
 
     const replyToken = this.replyTokens.take(threadId);
@@ -893,17 +895,15 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       return readStreamText(textStream);
     }
 
-    let renewal = this.startTyping(threadId);
+    await this.startTyping(threadId);
     const timer = setInterval(() => {
-      renewal = this.startTyping(threadId);
+      void this.startTyping(threadId);
     }, LOADING_ANIMATION_CHECK_MS);
 
     try {
       return await readStreamText(textStream);
     } finally {
       clearInterval(timer);
-      // A renewal reaching LINE after the reply would bring the animation back.
-      await renewal;
     }
   }
 
@@ -1103,30 +1103,60 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   /**
    * Shows LINE's loading animation, its typing indicator. LINE only displays
    * it in one-on-one chats, so group and room threads are skipped.
+   *
+   * This returns without waiting for LINE. The next send on the thread waits
+   * for the request first, so the animation cannot land after the reply.
    */
-  async startTyping(threadId: string): Promise<void> {
+  startTyping(threadId: string): Promise<void> {
     if (!this.isDM(threadId)) {
-      return;
+      return Promise.resolve();
     }
 
     const shownAt = this.loadingAnimationShownAt.get(threadId);
     if (shownAt && Date.now() - shownAt < LOADING_ANIMATION_COOLDOWN_MS) {
-      return;
+      return Promise.resolve();
     }
 
     const { sourceId } = this.decodeThreadId(threadId);
+    const requestedAt = Date.now();
+    this.loadingAnimationShownAt.set(threadId, requestedAt);
+    this.loadingAnimationsInFlight.set(
+      threadId,
+      this.requestLoadingAnimation(threadId, sourceId, requestedAt)
+    );
+    return Promise.resolve();
+  }
 
+  private async requestLoadingAnimation(
+    threadId: string,
+    sourceId: string,
+    requestedAt: number
+  ): Promise<void> {
     try {
       await this.client.showLoadingAnimation({
         chatId: sourceId,
         loadingSeconds: LOADING_ANIMATION_SECONDS,
       });
-      this.loadingAnimationShownAt.set(threadId, Date.now());
     } catch (error) {
+      if (this.loadingAnimationShownAt.get(threadId) === requestedAt) {
+        this.loadingAnimationShownAt.delete(threadId);
+      }
       this.logger.debug("Failed to show the loading animation", {
         error,
         threadId,
       });
+    }
+  }
+
+  private async settleLoadingAnimation(threadId: string): Promise<void> {
+    const pending = this.loadingAnimationsInFlight.get(threadId);
+    if (!pending) {
+      return;
+    }
+
+    await pending;
+    if (this.loadingAnimationsInFlight.get(threadId) === pending) {
+      this.loadingAnimationsInFlight.delete(threadId);
     }
   }
 

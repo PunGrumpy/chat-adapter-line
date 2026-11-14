@@ -2727,9 +2727,29 @@ describe("LineAdapter", () => {
       );
 
       await expect(adapter.startTyping(DM_THREAD)).resolves.toBeUndefined();
+      await delay(0);
       await adapter.startTyping(DM_THREAD);
 
       expect(mocks.showLoadingAnimation).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns before LINE answers and holds the next send until it does", async () => {
+      mocks.pushMessage.mockResolvedValue({ sentMessages: [{ id: "p-1" }] });
+      const answer = new EventTarget();
+      mocks.showLoadingAnimation.mockReturnValueOnce(once(answer, "done"));
+
+      await adapter.startTyping(DM_THREAD);
+      const posted = adapter.postMessage(DM_THREAD, "Done");
+      await delay(0);
+
+      expect(mocks.showLoadingAnimation).toHaveBeenCalledOnce();
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+      expect(mocks.replyMessage).not.toHaveBeenCalled();
+
+      answer.dispatchEvent(new Event("done"));
+      await posted;
+
+      expect(mocks.pushMessage).toHaveBeenCalledOnce();
     });
   });
 

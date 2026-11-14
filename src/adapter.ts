@@ -325,6 +325,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     const body = await request.text();
 
     if (!verifySignature(body, signature, this.channelSecret)) {
+      this.logger.warn(
+        "LINE webhook rejected due to invalid signature. Check that channelSecret (or LINE_CHANNEL_SECRET) is the Channel secret from the LINE Developers Console for this channel."
+      );
       return new Response("Invalid signature", { status: 401 });
     }
 

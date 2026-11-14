@@ -613,6 +613,32 @@ describe("LineAdapter", () => {
       expect(response.status).toBe(401);
     });
 
+    it("warns once about the channel secret and keeps the secret, signature, and body out of the log", async () => {
+      const logger = {
+        child: vi.fn(),
+        debug: vi.fn(),
+        error: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+      };
+      const loggedAdapter = new LineAdapter({ ...validConfig, logger });
+      const body = JSON.stringify({ destination: "ch-123", events: [] });
+      const wrongSig = generateSignature(body, "wrong-secret");
+
+      const response = await loggedAdapter.handleWebhook(
+        makeRequest(body, wrongSig)
+      );
+
+      expect(response.status).toBe(401);
+      expect(await response.text()).toBe("Invalid signature");
+      expect(logger.warn).toHaveBeenCalledOnce();
+      const logged = JSON.stringify(logger.warn.mock.calls);
+      expect(logged).toContain("channelSecret");
+      expect(logged).not.toContain(validConfig.channelSecret);
+      expect(logged).not.toContain(wrongSig);
+      expect(logged).not.toContain("ch-123");
+    });
+
     it.each([
       ["a short signature", "abc"],
       ["a long signature", "a".repeat(100)],

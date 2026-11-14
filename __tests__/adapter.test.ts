@@ -977,6 +977,7 @@ describe("LineAdapter", () => {
     let mockChat: {
       processMessage: Mock;
       processAction: Mock;
+      processMemberJoinedChannel: Mock;
       getLogger: Mock;
     };
 
@@ -1006,6 +1007,7 @@ describe("LineAdapter", () => {
           warn: vi.fn(),
         })),
         processAction: vi.fn(),
+        processMemberJoinedChannel: vi.fn(),
         processMessage: vi.fn(),
       };
 

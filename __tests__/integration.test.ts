@@ -10,6 +10,7 @@ import { createLineAdapter } from "../src/index.js";
 import { isRecord } from "../src/lib/is-record.js";
 import type {
   LineEvent,
+  LineLifecycleRawEvent,
   LineMessageEvent,
   LinePostbackEvent,
 } from "../src/types.js";
@@ -141,6 +142,38 @@ const makePostbackEvent = (data: string): LinePostbackEvent => {
   };
 };
 
+const GROUP_CHANNEL_ID = `line:${BOT_USER_ID}:group:${GROUP_ID}`;
+const NEWCOMER_ID = "Unewcomer000000000000000000000000";
+const SECOND_NEWCOMER_ID = "Usecond0000000000000000000000000000";
+
+const makeLifecycleEvent = (
+  overrides: Partial<LineLifecycleRawEvent> &
+    Pick<LineLifecycleRawEvent, "type">
+): LineLifecycleRawEvent => {
+  const number = nextEventNumber();
+  return {
+    deliveryContext: { isRedelivery: false },
+    mode: "active",
+    replyToken: `reply-token-${number}`,
+    source: { groupId: GROUP_ID, type: "group" },
+    timestamp: Date.now(),
+    webhookEventId: `event-${number}`,
+    ...overrides,
+  };
+};
+
+const makeMemberJoinedEvent = (
+  userIds: (string | undefined)[],
+  overrides: Partial<LineLifecycleRawEvent> = {}
+): LineLifecycleRawEvent =>
+  makeLifecycleEvent({
+    joined: {
+      members: userIds.map((userId) => ({ type: "user", userId })),
+    },
+    type: "memberJoined",
+    ...overrides,
+  });
+
 const createBot = () =>
   new Chat({
     adapters: {
@@ -162,7 +195,7 @@ const sign = (body: string, secret: string): string =>
 // Chat runs handlers after the webhook has answered, so wait for them before
 // the caller asserts on what they did.
 const postWebhook = async (
-  events: LineEvent[],
+  events: (LineEvent | LineLifecycleRawEvent)[],
   signingSecret = CHANNEL_SECRET
 ): Promise<Response> => {
   const body = JSON.stringify({ destination: BOT_USER_ID, events });
@@ -375,4 +408,154 @@ describe("LINE adapter inside a real Chat", () => {
       ]);
     }
   );
+  describe("onMemberJoinedChannel", () => {
+    it("fires once per joined member and welcomes them over the free reply", async () => {
+      const joined: { channelId: string; userId: string }[] = [];
+      bot.onMemberJoinedChannel(async (event) => {
+        joined.push({ channelId: event.channelId, userId: event.userId });
+        await bot.channel(event.channelId).post("Welcome!");
+      });
+      const event = makeMemberJoinedEvent([NEWCOMER_ID, SECOND_NEWCOMER_ID]);
+
+      const response = await postWebhook([event]);
+
+      expect(response.status).toBe(200);
+      expect(joined).toEqual([
+        { channelId: GROUP_CHANNEL_ID, userId: NEWCOMER_ID },
+        { channelId: GROUP_CHANNEL_ID, userId: SECOND_NEWCOMER_ID },
+      ]);
+      expect(mocks.replyMessage).toHaveBeenCalledTimes(1);
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Welcome!", type: "text" }],
+        replyToken: event.replyToken,
+      });
+      expect(mocks.pushMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips a joined member LINE did not identify", async () => {
+      const joined: string[] = [];
+      bot.onMemberJoinedChannel((event) => {
+        joined.push(event.userId);
+      });
+
+      await postWebhook([makeMemberJoinedEvent([undefined, NEWCOMER_ID])]);
+
+      expect(joined).toEqual([NEWCOMER_ID]);
+    });
+
+    it("fires once with the bot's own ID when the bot joins a group", async () => {
+      const joined: { channelId: string; userId: string }[] = [];
+      let inviterId: string | undefined = "unset";
+      bot.onMemberJoinedChannel(async (event) => {
+        joined.push({ channelId: event.channelId, userId: event.userId });
+        ({ inviterId } = event);
+        await bot.channel(event.channelId).post("Thanks for adding me");
+      });
+      const event = makeLifecycleEvent({ type: "join" });
+
+      await postWebhook([event]);
+
+      expect(joined).toEqual([
+        { channelId: GROUP_CHANNEL_ID, userId: BOT_USER_ID },
+      ]);
+      expect(inviterId).toBeUndefined();
+      expect(mocks.replyMessage).toHaveBeenCalledWith({
+        messages: [{ text: "Thanks for adding me", type: "text" }],
+        replyToken: event.replyToken,
+      });
+    });
+
+    it("lets a handler tell the bot's own join from a person's", async () => {
+      const people: string[] = [];
+      bot.onMemberJoinedChannel((event) => {
+        if (event.userId !== event.adapter.botUserId) {
+          people.push(event.userId);
+        }
+      });
+
+      await postWebhook([
+        makeLifecycleEvent({ type: "join" }),
+        makeMemberJoinedEvent([NEWCOMER_ID]),
+      ]);
+
+      expect(people).toEqual([NEWCOMER_ID]);
+    });
+
+    it.each([
+      ["a redelivered event", { deliveryContext: { isRedelivery: true } }],
+      ["a standby-mode event", { mode: "standby" as const }],
+    ])("fires nothing for %s", async (_name, overrides) => {
+      const joined: string[] = [];
+      bot.onMemberJoinedChannel((event) => {
+        joined.push(event.userId);
+      });
+
+      await postWebhook([
+        makeMemberJoinedEvent([NEWCOMER_ID], overrides),
+        makeLifecycleEvent({ type: "join", ...overrides }),
+      ]);
+
+      expect(joined).toEqual([]);
+    });
+
+    it("fires nothing for LINE's webhook verification token", async () => {
+      const joined: string[] = [];
+      bot.onMemberJoinedChannel((event) => {
+        joined.push(event.userId);
+      });
+
+      await postWebhook([
+        makeMemberJoinedEvent([NEWCOMER_ID], {
+          replyToken: "00000000000000000000000000000000",
+        }),
+      ]);
+
+      expect(joined).toEqual([]);
+    });
+
+    it("fires nothing for events that are not joins", async () => {
+      const joined: string[] = [];
+      bot.onMemberJoinedChannel((event) => {
+        joined.push(event.userId);
+      });
+
+      await postWebhook([
+        makeLifecycleEvent({ replyToken: undefined, type: "leave" }),
+        makeLifecycleEvent({
+          left: { members: [{ type: "user", userId: NEWCOMER_ID }] },
+          replyToken: undefined,
+          type: "memberLeft",
+        }),
+        makeLifecycleEvent({
+          source: { type: "user", userId: SENDER_ID },
+          type: "follow",
+        }),
+      ]);
+
+      expect(joined).toEqual([]);
+    });
+
+    it("keeps onLifecycleEvent delivering redelivered and standby events", async () => {
+      const seen: string[] = [];
+      const adapter = bot.getAdapter("line");
+      adapter.onLifecycleEvent((event) => {
+        seen.push(`${event.type}:${event.mode}:${event.isRedelivery}`);
+      });
+      bot.onMemberJoinedChannel(() => {});
+
+      await postWebhook([
+        makeMemberJoinedEvent([NEWCOMER_ID]),
+        makeMemberJoinedEvent([NEWCOMER_ID], {
+          deliveryContext: { isRedelivery: true },
+        }),
+        makeLifecycleEvent({ mode: "standby", type: "join" }),
+      ]);
+
+      expect(seen).toEqual([
+        "memberJoined:active:false",
+        "memberJoined:active:true",
+        "join:standby:false",
+      ]);
+    });
+  });
 });

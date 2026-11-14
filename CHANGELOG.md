@@ -1,5 +1,13 @@
 # chat-adapter-line
 
+## 0.1.10
+
+### Patch Changes
+
+- 772a595: Fire the Chat SDK's `bot.onMemberJoinedChannel()` on LINE when the bot is added to a group or room (once, with the bot's own ID as `userId`) and when people join one it is in (once per member), so a welcome message written for Slack or Teams works here too. Redelivered and standby-mode events are skipped, and `adapter.botUserId` lets a handler tell the bot's own join from a person's.
+- 34daaac: Return from `thread.startTyping()` without waiting for LINE, so your handler starts its real work about one LINE round trip sooner on every 1:1 reply. The bot's next message still waits for the animation request, so the animation never reappears under the reply.
+- 4e8e0e4: Ignore spaces and newlines around `channelSecret` and `channelAccessToken`, so a value copied from the LINE console or read from a `.env` file with a trailing newline no longer makes every webhook fail with `401 Invalid signature`. A webhook whose signature does not match now logs a warning that points at the channel secret.
+
 ## 0.1.9
 
 ### Patch Changes

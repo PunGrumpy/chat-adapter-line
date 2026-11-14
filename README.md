@@ -518,7 +518,7 @@ bot.onMemberJoinedChannel(async (event) => {
 
 `memberJoined` calls the handler once for each new member, with that member's `userId`. A member LINE does not identify is skipped. `join`, which LINE sends when the bot is added to a group or room, calls it once with the bot's own ID as `userId`, as Slack does. Compare it with `event.adapter.botUserId` to tell the bot from a person. LINE sends no inviter, so `inviterId` is never set. Each group or room is its own channel, so `event.channelId` names that conversation.
 
-The reply token travels with the event, so the welcome goes out over the free Reply API. Unlike `onLifecycleEvent()`, this handler never sees a redelivered or standby-mode event, because the Chat SDK does not deduplicate and a repeated welcome annoys people. `leave` and `memberLeft` are not routed, so use `onLifecycleEvent()` for them.
+LINE sends one reply token per event, so the first post for that event goes out over the free Reply API, and each later post, such as the second welcome when two people join at once, goes out over the quota-metered Push API. Unlike `onLifecycleEvent()`, this handler never sees a redelivered or standby-mode event, because the Chat SDK does not deduplicate and a repeated welcome annoys people. `leave` and `memberLeft` are not routed, so use `onLifecycleEvent()` for them.
 
 ### Broadcast and multicast
 

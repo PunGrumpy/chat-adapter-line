@@ -182,6 +182,9 @@ const toRateLimitError = (
 
 const VERIFICATION_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;
 
+const isVerificationReplyToken = (token: string | undefined): boolean =>
+  token !== undefined && VERIFICATION_REPLY_TOKEN_PATTERN.test(token);
+
 /**
  * LINE accepts multiples of 5 up to 60, and hides the animation early when
  * the bot's next message arrives.
@@ -283,6 +286,15 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
         { error }
       );
     }
+  }
+
+  /**
+   * The bot's own LINE user ID, which is also the `userId` the Chat SDK
+   * reports when the bot itself joins a group or room. It is unset until
+   * the adapter has fetched it from LINE or read it from the first webhook.
+   */
+  get botUserId(): string | undefined {
+    return this.channelId ?? undefined;
   }
 
   disconnect(): Promise<void> {
@@ -443,7 +455,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
     if (
       lifecycle.replyToken !== undefined &&
-      !VERIFICATION_REPLY_TOKEN_PATTERN.test(lifecycle.replyToken)
+      !isVerificationReplyToken(lifecycle.replyToken)
     ) {
       this.replyTokens.set(threadId, lifecycle.replyToken);
     }
@@ -451,6 +463,44 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     for (const handler of this.lifecycleHandlers) {
       const task = this.runLifecycleHandler(handler, lifecycle);
       options?.waitUntil?.(task);
+    }
+
+    this.routeMemberJoined(lifecycle, channelId, options);
+  }
+
+  /**
+   * Feeds `join` and `memberJoined` to the Chat SDK's
+   * `onMemberJoinedChannel`. Unlike `onLifecycleEvent`, only active,
+   * first-time events get through, because the SDK does not deduplicate and
+   * a repeated welcome message annoys people.
+   */
+  private routeMemberJoined(
+    lifecycle: LineLifecycleEvent,
+    botUserId: string,
+    options?: WebhookOptions
+  ): void {
+    if (
+      !this.chat ||
+      lifecycle.mode !== "active" ||
+      lifecycle.isRedelivery ||
+      isVerificationReplyToken(lifecycle.replyToken)
+    ) {
+      return;
+    }
+
+    let userIds: string[] = [];
+    if (lifecycle.type === "join") {
+      userIds = [botUserId];
+    } else if (lifecycle.type === "memberJoined") {
+      userIds = lifecycle.members ?? [];
+    }
+
+    const channelId = this.channelIdFromThreadId(lifecycle.threadId);
+    for (const userId of userIds) {
+      this.chat.processMemberJoinedChannel(
+        { adapter: this, channelId, userId },
+        options
+      );
     }
   }
 

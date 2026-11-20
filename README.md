@@ -92,6 +92,19 @@ LINE cannot edit a sent message, so `thread.post()` with a text stream, such as 
 
 A user who sends several photos at once produces several message events at the same moment. The Chat SDK's default is `concurrency: "drop"`, so the events after the first are discarded while a handler runs. The SDK offers other strategies. See the [Chat SDK concurrency docs](https://chat-sdk.dev/docs/concurrency).
 
+With `queue`, `debounce`, or `burst`, the SDK stores a waiting message in your state adapter. On `chat` 4.27.0 or later its attachments keep `fetchData()`, so a photo that waited still downloads. A state adapter that stores JSON, such as Redis or Postgres, hands the message back as a plain `Message`, so `message instanceof LineMessage` is false for it. Parse its raw event again to read the LINE fields:
+
+```typescript
+import type { LineMessageEvent } from "chat-adapter-line";
+
+bot.onSubscribedMessage(async (thread, message) => {
+  const lineMessage = bot
+    .getAdapter("line")
+    .parseMessage(message.raw as LineMessageEvent);
+  console.log(lineMessage.media?.kind);
+});
+```
+
 ### Direct messages and mentions
 
 A LINE thread whose source is a single user is a direct message, so `bot.onDirectMessage()` fires for 1:1 chats. That handler needs `chat` 4.20.0 or later. In groups and rooms, LINE delivers native mentions as structured data. The adapter parses them onto the message and sets `message.isMention` when someone mentions the bot, so `onNewMention()` works without any `@name` text matching. Each LINE conversation is its own Chat SDK channel, so `thread.channel.post()` sends to the same 1:1 chat, group, or room, and `thread.channel.setState()` keeps state for that conversation alone.

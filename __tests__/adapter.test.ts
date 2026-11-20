@@ -11,6 +11,7 @@ import {
 } from "@chat-adapter/shared";
 import { LineBotClient } from "@line/bot-sdk";
 import { deriveChannelId, NotImplementedError, parseMarkdown } from "chat";
+import type { Attachment } from "chat";
 import {
   afterEach,
   beforeEach,
@@ -24,6 +25,10 @@ import type { Mock } from "vite-plus/test";
 import { LineAdapter, LineFormatConverter } from "../src/adapter.js";
 import { LineMessage } from "../src/message.js";
 import type { LineMessageEvent, LinePostbackEvent } from "../src/types.js";
+
+type StoredAttachment = Attachment & {
+  fetchMetadata?: Record<string, string>;
+};
 
 const mocks = vi.hoisted(() => {
   class HTTPFetchError extends Error {
@@ -1827,6 +1832,94 @@ describe("LineAdapter", () => {
 
       expect(attachment.fetchData).toBeUndefined();
       expect(attachment.url).toBe("https://example.com/original.jpg");
+    });
+
+    it("names the LINE message on the attachment so a stored copy can be fetched again", () => {
+      const event = makeEvent({
+        message: {
+          contentProvider: { type: "line" },
+          id: "img-1",
+          type: "image",
+        },
+      } as never);
+
+      const [attachment]: StoredAttachment[] =
+        adapter.parseMessage(event).attachments;
+
+      expect(attachment.fetchMetadata).toEqual({ messageId: "img-1" });
+    });
+
+    it("leaves fetchMetadata unset for a file the sender's app hosts", () => {
+      const event = makeEvent({
+        message: {
+          contentProvider: {
+            originalContentUrl: "https://example.com/original.jpg",
+            previewImageUrl: "https://example.com/preview.jpg",
+            type: "external",
+          },
+          id: "img-ext",
+          type: "image",
+        },
+      } as never);
+
+      const [attachment]: StoredAttachment[] =
+        adapter.parseMessage(event).attachments;
+
+      expect(attachment.fetchMetadata).toBeUndefined();
+    });
+
+    it("restores fetchData on an attachment that came back from JSON", async () => {
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([Buffer.from("image-bytes")]),
+        httpResponse: new Response(null, { status: 200 }),
+      });
+      const event = makeEvent({
+        message: {
+          contentProvider: { type: "line" },
+          id: "img-1",
+          type: "image",
+        },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+      const serialized = JSON.stringify(attachment);
+      const stored: Attachment = JSON.parse(serialized);
+
+      const restored = adapter.rehydrateAttachment(stored);
+      const data = await restored.fetchData?.();
+
+      expect(stored.fetchData).toBeUndefined();
+      expect(data?.toString()).toBe("image-bytes");
+      expect(mocks.getMessageContentWithHttpInfo).toHaveBeenCalledWith("img-1");
+    });
+
+    it("reports CONTENT_NOT_READY from a restored attachment LINE is still preparing", async () => {
+      mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+        body: Readable.from([]),
+        httpResponse: new Response(null, { status: 202 }),
+      });
+      const event = makeEvent({
+        message: {
+          contentProvider: { type: "line" },
+          id: "img-1",
+          type: "image",
+        },
+      } as never);
+      const [attachment] = adapter.parseMessage(event).attachments;
+      const serialized = JSON.stringify(attachment);
+      const stored: Attachment = JSON.parse(serialized);
+
+      await expect(
+        adapter.rehydrateAttachment(stored).fetchData?.()
+      ).rejects.toMatchObject({ code: "CONTENT_NOT_READY" });
+    });
+
+    it("returns an attachment with no LINE message to fetch unchanged", () => {
+      const external = {
+        type: "image" as const,
+        url: "https://example.com/a.jpg",
+      };
+
+      expect(adapter.rehydrateAttachment(external)).toBe(external);
     });
 
     it("drops the attachment when a media message carries no ID", () => {

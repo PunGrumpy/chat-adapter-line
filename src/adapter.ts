@@ -75,6 +75,13 @@ import type {
 
 export { LineFormatConverter } from "./lib/format-converter.js";
 
+/**
+ * `chat` 4.17.0's `Attachment` has no `fetchMetadata`, so the field is
+ * declared here and joined to whichever `Attachment` the installed `chat`
+ * exports.
+ */
+type LineAttachment = Attachment & { fetchMetadata?: Record<string, string> };
+
 type RawMessageType = LineMessageEvent["message"]["type"];
 
 interface SendResult {
@@ -613,7 +620,7 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     const attachments: Attachment[] = [];
     if (media) {
       const messageId = media.providerMessageId;
-      const attachment: Attachment = {
+      const attachment: LineAttachment = {
         mimeType: getMimeType(media.kind),
         name: media.fileName ?? `${media.kind}-${messageId}`,
         type: media.kind,
@@ -621,19 +628,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
 
       // LINE's content API answers 404 for a file the sender's app hosts.
       if (media.contentProvider?.type !== "external") {
-        attachment.fetchData = async () => {
-          const { body, httpResponse } = await this.callLine(() =>
-            this.client.getMessageContentWithHttpInfo(messageId)
-          );
-          if (httpResponse.status === CONTENT_PREPARING_STATUS) {
-            throw new AdapterError(
-              `LINE is still preparing this ${media.kind}. Call fetchData() again later.`,
-              "line",
-              "CONTENT_NOT_READY"
-            );
-          }
-          return readableToBuffer(body);
-        };
+        attachment.fetchData = () =>
+          this.fetchMessageContent(messageId, media.kind);
+        attachment.fetchMetadata = { messageId };
       }
 
       if (media.fileSize !== undefined) {
@@ -673,6 +670,42 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
       text,
       threadId,
     });
+  }
+
+  /**
+   * Gives a media attachment its `fetchData` back after the Chat SDK has
+   * stored the message as JSON, which it does to queue a message behind a
+   * running handler. `fetchMetadata` survives that and names the LINE
+   * message to fetch. `chat` calls this from 4.27.0 on.
+   */
+  rehydrateAttachment(attachment: Attachment): Attachment {
+    const { fetchMetadata }: LineAttachment = attachment;
+    const messageId = fetchMetadata?.messageId;
+    if (!isNonEmptyString(messageId)) {
+      return attachment;
+    }
+
+    return {
+      ...attachment,
+      fetchData: () => this.fetchMessageContent(messageId, attachment.type),
+    };
+  }
+
+  private async fetchMessageContent(
+    messageId: string,
+    kind: Attachment["type"]
+  ): Promise<Buffer> {
+    const { body, httpResponse } = await this.callLine(() =>
+      this.client.getMessageContentWithHttpInfo(messageId)
+    );
+    if (httpResponse.status === CONTENT_PREPARING_STATUS) {
+      throw new AdapterError(
+        `LINE is still preparing this ${kind}. Call fetchData() again later.`,
+        "line",
+        "CONTENT_NOT_READY"
+      );
+    }
+    return readableToBuffer(body);
   }
 
   async postMessage(

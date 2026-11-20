@@ -80,7 +80,7 @@ Then connect LINE to the route:
 
 ### Reply-token-first sending
 
-LINE does not bill Reply API calls, but each Push API call counts against the channel's monthly message quota. That quota varies by plan and by country or region.
+LINE does not bill Reply API calls, but each Push API call counts against the channel's monthly message quota. That quota varies by plan and by country or region. When the quota is used up, LINE answers a push with 429 and the adapter throws `AdapterRateLimitError`. Its message ends with LINE's reason, `You have reached your monthly limit.`, and `error.cause` is the LINE SDK's `HTTPFetchError`.
 
 When your bot answers an inbound message, the adapter sends that first reply through the Reply API. Later sends use the Push API, because a reply token works once and expires within a minute. You don't need to change any adapter code.
 
@@ -540,7 +540,7 @@ await adapter.multicastMessages(
 
 The adapter forwards `retryKey` as `X-Line-Retry-Key`. Reuse the same key when you retry a request whose outcome you don't know, and LINE delivers it once.
 
-Before calling LINE, the adapter validates user IDs, the retry key, and the five-message limit, and throws instead of truncating. 429 responses become `AdapterRateLimitError`. The returned `requestId` is LINE's `X-Line-Request-Id`, which you can use to reconcile the submission.
+Before calling LINE, the adapter validates user IDs, the retry key, and the five-message limit, and throws instead of truncating. 429 responses become `AdapterRateLimitError`, whose message ends with LINE's reason and whose `cause` is the LINE SDK's error. The returned `requestId` is LINE's `X-Line-Request-Id`, which you can use to reconcile the submission.
 
 ## License
 

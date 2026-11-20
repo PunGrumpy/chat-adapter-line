@@ -1,6 +1,8 @@
 /* eslint-disable max-classes-per-file */
 import crypto from "node:crypto";
+import { once } from "node:events";
 import { readFileSync } from "node:fs";
+import { Readable } from "node:stream";
 
 import { createMemoryState } from "@chat-adapter/state-memory";
 import { Chat } from "chat";
@@ -38,6 +40,7 @@ const mocks = vi.hoisted(() => {
   return {
     HTTPFetchError,
     getBotInfo: vi.fn(),
+    getMessageContentWithHttpInfo: vi.fn(),
     pushMessage: vi.fn(),
     replyMessage: vi.fn(),
     showLoadingAnimation: vi.fn(),
@@ -47,6 +50,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("@line/bot-sdk", () => {
   class MockLineBotClient {
     getBotInfo = mocks.getBotInfo;
+    getMessageContentWithHttpInfo = mocks.getMessageContentWithHttpInfo;
     pushMessage = mocks.pushMessage;
     replyMessage = mocks.replyMessage;
     showLoadingAnimation = mocks.showLoadingAnimation;
@@ -79,6 +83,7 @@ const botMention: NonNullable<LineMessageEvent["message"]["mention"]> = {
 };
 
 const FIRST_CHAT_VERSION_WITH_HISTORY = { major: 4, minor: 20 };
+const FIRST_CHAT_VERSION_WITH_ATTACHMENT_REHYDRATION = { major: 4, minor: 27 };
 
 const readInstalledChatVersion = (): string => {
   const manifest: unknown = JSON.parse(
@@ -93,16 +98,20 @@ const readInstalledChatVersion = (): string => {
   return manifest.version;
 };
 
-const chatKeepsThreadHistory = (): boolean => {
+const installedChatIsAtLeast = (version: {
+  major: number;
+  minor: number;
+}): boolean => {
   const [major = 0, minor = 0] = readInstalledChatVersion()
     .split(".")
     .map(Number);
   return (
-    major > FIRST_CHAT_VERSION_WITH_HISTORY.major ||
-    (major === FIRST_CHAT_VERSION_WITH_HISTORY.major &&
-      minor >= FIRST_CHAT_VERSION_WITH_HISTORY.minor)
+    major > version.major || (major === version.major && minor >= version.minor)
   );
 };
+
+const chatKeepsThreadHistory = (): boolean =>
+  installedChatIsAtLeast(FIRST_CHAT_VERSION_WITH_HISTORY);
 
 let eventCount = 0;
 
@@ -119,6 +128,24 @@ const makeGroupTextEvent = (
   return {
     deliveryContext: { isRedelivery: false },
     message: { id: `msg-${number}`, mention, text, type: "text" },
+    mode: "active",
+    replyToken: `reply-token-${number}`,
+    source: { groupId: GROUP_ID, type: "group", userId: SENDER_ID },
+    timestamp: Date.now(),
+    type: "message",
+    webhookEventId: `event-${number}`,
+  };
+};
+
+const makeGroupImageEvent = (): LineMessageEvent => {
+  const number = nextEventNumber();
+  return {
+    deliveryContext: { isRedelivery: false },
+    message: {
+      contentProvider: { type: "line" },
+      id: `img-${number}`,
+      type: "image",
+    },
     mode: "active",
     replyToken: `reply-token-${number}`,
     source: { groupId: GROUP_ID, type: "group", userId: SENDER_ID },
@@ -174,7 +201,12 @@ const makeMemberJoinedEvent = (
     ...overrides,
   });
 
-const createBot = () =>
+const createBot = (
+  overrides: {
+    concurrency?: "queue";
+    state?: ReturnType<typeof createMemoryState>;
+  } = {}
+) =>
   new Chat({
     adapters: {
       line: createLineAdapter({
@@ -185,7 +217,20 @@ const createBot = () =>
     logger: "error",
     state: createMemoryState(),
     userName: "linebot",
+    ...overrides,
   });
+
+// Redis and Postgres state adapters store a queued message as JSON; the
+// memory adapter keeps the object, so the round trip is made here.
+const createQueueingBot = () => {
+  const state = createMemoryState();
+  const enqueue = state.enqueue.bind(state);
+  state.enqueue = (threadId, entry, maxSize) => {
+    const serialized = JSON.stringify(entry);
+    return enqueue(threadId, JSON.parse(serialized), maxSize);
+  };
+  return createBot({ concurrency: "queue", state });
+};
 
 let bot: ReturnType<typeof createBot>;
 
@@ -242,6 +287,7 @@ const failingStreamOf = async function* failingStreamOfGen(
 describe("LINE adapter inside a real Chat", () => {
   beforeEach(() => {
     mocks.getBotInfo.mockReset().mockResolvedValue({ userId: BOT_USER_ID });
+    mocks.getMessageContentWithHttpInfo.mockReset();
     mocks.pushMessage
       .mockReset()
       .mockResolvedValue({ sentMessages: [{ id: "sent-1" }] });
@@ -612,5 +658,58 @@ describe("LINE adapter inside a real Chat", () => {
         "join:standby:false",
       ]);
     });
+  });
+
+  describe("queued messages", () => {
+    it.runIf(
+      installedChatIsAtLeast(FIRST_CHAT_VERSION_WITH_ATTACHMENT_REHYDRATION)
+    )(
+      "lets a handler download a photo that waited in the queue as JSON",
+      async () => {
+        bot = createQueueingBot();
+        mocks.getMessageContentWithHttpInfo.mockResolvedValue({
+          body: Readable.from([Buffer.from("photo-bytes")]),
+          httpResponse: new Response(null, { status: 200 }),
+        });
+        const started = new EventTarget();
+        const release = new EventTarget();
+        const downloads: string[] = [];
+        const reparsedKinds: (string | undefined)[] = [];
+        bot.onNewMention(async (thread) => {
+          await thread.subscribe();
+          started.dispatchEvent(new Event("started"));
+          await once(release, "release");
+        });
+        bot.onSubscribedMessage(async (_thread, message) => {
+          const [attachment] = message.attachments;
+          const bytes = await attachment?.fetchData?.();
+          downloads.push(
+            bytes instanceof ArrayBuffer
+              ? Buffer.from(bytes).toString()
+              : (bytes?.toString() ?? "no fetchData")
+          );
+          reparsedKinds.push(
+            bot.getAdapter("line").parseMessage(message.raw as LineMessageEvent)
+              .media?.kind
+          );
+        });
+        const firstHandlerStarted = once(started, "started");
+
+        const first = postWebhook([
+          makeGroupTextEvent(`${BOT_MENTION} hello`, botMention),
+        ]);
+        await firstHandlerStarted;
+        const image = makeGroupImageEvent();
+        await postWebhook([image]);
+        release.dispatchEvent(new Event("release"));
+        await first;
+
+        expect(downloads).toEqual(["photo-bytes"]);
+        expect(reparsedKinds).toEqual(["image"]);
+        expect(mocks.getMessageContentWithHttpInfo).toHaveBeenCalledWith(
+          image.message.id
+        );
+      }
+    );
   });
 });

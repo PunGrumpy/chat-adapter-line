@@ -221,6 +221,24 @@ const postWebhook = async (
   return response;
 };
 
+const streamOf = async function* streamOfGen(
+  ...texts: string[]
+): AsyncGenerator<string> {
+  for (const text of texts) {
+    yield text;
+  }
+};
+
+const failingStreamOf = async function* failingStreamOfGen(
+  error: Error,
+  ...texts: string[]
+): AsyncGenerator<string> {
+  for (const text of texts) {
+    yield text;
+  }
+  throw error;
+};
+
 describe("LINE adapter inside a real Chat", () => {
   beforeEach(() => {
     mocks.getBotInfo.mockReset().mockResolvedValue({ userId: BOT_USER_ID });
@@ -354,6 +372,43 @@ describe("LINE adapter inside a real Chat", () => {
     expect(texts.every((text: string) => text.length <= 5000)).toBe(true);
     expect(texts.join(" ")).toBe(words.join(" "));
     expect(mocks.pushMessage).not.toHaveBeenCalled();
+  });
+
+  it("sends a streamed reply once, through that event's reply token", async () => {
+    bot.onNewMention(async (thread) => {
+      await thread.post(streamOf("Hello ", "world"));
+    });
+    const event = makeGroupTextEvent(`${BOT_MENTION} hello`, botMention);
+
+    await postWebhook([event]);
+
+    expect(mocks.replyMessage).toHaveBeenCalledExactlyOnceWith({
+      messages: [{ text: "Hello world", type: "text" }],
+      replyToken: event.replyToken,
+    });
+    expect(mocks.pushMessage).not.toHaveBeenCalled();
+  });
+
+  it("sends what a stream produced before it failed, and the handler still sees the failure", async () => {
+    const failure = new Error("model stream broke");
+    const caught: unknown[] = [];
+    bot.onNewMention(async (thread) => {
+      try {
+        await thread.post(failingStreamOf(failure, "Hello ", "world"));
+      } catch (error) {
+        caught.push(error);
+      }
+    });
+    const event = makeGroupTextEvent(`${BOT_MENTION} hello`, botMention);
+
+    await postWebhook([event]);
+
+    expect(caught).toHaveLength(1);
+    expect(caught[0]).toBe(failure);
+    expect(mocks.replyMessage).toHaveBeenCalledExactlyOnceWith({
+      messages: [{ text: "Hello world", type: "text" }],
+      replyToken: event.replyToken,
+    });
   });
 
   it("lets a handler read thread history without an error", async () => {

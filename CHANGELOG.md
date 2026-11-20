@@ -1,5 +1,17 @@
 # chat-adapter-line
 
+## 0.1.10
+
+### Patch Changes
+
+- 075451d: Keep what Markdown says when it becomes LINE text. Inside a table, a link or an image keeps its URL as `text (url)`, the way it does anywhere else. A task list keeps its `[x]` and `[ ]` checkboxes, a footnote keeps its `[1]` marker, and a reference-style image keeps its alt text. Before, `- [x] done` and `- [ ] todo` looked the same, and a table link could not be opened.
+- 772a595: Fire the Chat SDK's `bot.onMemberJoinedChannel()` on LINE when the bot is added to a group or room (once, with the bot's own ID as `userId`) and when people join one it is in (once per member), so a welcome message written for Slack or Teams works here too. Redelivered and standby-mode events are skipped, and `adapter.botUserId` lets a handler tell the bot's own join from a person's.
+- 34daaac: Return from `thread.startTyping()` without waiting for LINE, so your handler starts its real work about one LINE round trip sooner on every 1:1 reply. The bot's next message still waits for the animation request, so the animation never reappears under the reply.
+- fb3c89c: Send the text a stream produced before it failed instead of dropping it. When an AI stream breaks partway, `thread.post()` now delivers what the adapter has collected and then rethrows the stream's error, so the user keeps the partial reply and your handler still sees the failure.
+- cd17d0e: Keep `fetchData()` on the media attachments of a message the Chat SDK queued. With `concurrency: "queue"`, `"debounce"`, or `"burst"` and a state adapter that stores JSON, such as Redis, a photo, video, audio clip, or file that waited behind a running handler arrived with no way to download it. The adapter now implements `rehydrateAttachment`, which `chat` 4.27.0 and later call to restore it.
+- b3805f9: Say why LINE answered 429. LINE uses 429 both for request throttling and for a channel that has used up its monthly messages, and both used to read `Rate limited by line`. The `AdapterRateLimitError` message now ends with LINE's own reason, for example `Rate limited by line: You have reached your monthly limit.`, and `error.cause` holds the LINE SDK's `HTTPFetchError` with the status, headers, and body.
+- 4e8e0e4: Ignore spaces and newlines around `channelSecret` and `channelAccessToken`, so a value copied from the LINE console or read from a `.env` file with a trailing newline no longer makes every webhook fail with `401 Invalid signature`. A webhook whose signature does not match now logs a warning that points at the channel secret.
+
 ## 0.1.9
 
 ### Patch Changes

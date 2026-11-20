@@ -233,13 +233,21 @@ const makeReplyTokenError = (): Error =>
     JSON.stringify({ message: "Invalid reply token" })
   );
 
-const makeRateLimitError = (retryAfterSeconds?: number): Error => {
+const makeRateLimitError = (
+  retryAfterSeconds?: number,
+  reason?: string
+): Error => {
   const headers = new Headers(
     retryAfterSeconds === undefined
       ? undefined
       : { "retry-after": String(retryAfterSeconds) }
   );
-  return new mocks.HTTPFetchError("429 - Too Many Requests", 429, "", headers);
+  return new mocks.HTTPFetchError(
+    "429 - Too Many Requests",
+    429,
+    reason === undefined ? "" : JSON.stringify({ message: reason }),
+    headers
+  );
 };
 
 const acceptedResponse = (requestId?: string) => ({
@@ -2217,6 +2225,51 @@ describe("LineAdapter", () => {
         });
       }
     );
+
+    it("says why LINE answered 429", async () => {
+      const failure = makeRateLimitError(
+        undefined,
+        "You have reached your monthly limit."
+      );
+      mocks.pushMessage.mockRejectedValueOnce(failure);
+
+      const promise = adapter.postMessage("line:bot-123:user:u-123", "Hello");
+
+      await expect(promise).rejects.toBeInstanceOf(AdapterRateLimitError);
+      await expect(promise).rejects.toMatchObject({
+        cause: failure,
+        message: "Rate limited by line: You have reached your monthly limit.",
+      });
+    });
+
+    it("keeps the retry delay next to LINE's reason", async () => {
+      mocks.pushMessage.mockRejectedValueOnce(
+        makeRateLimitError(
+          30,
+          "The API rate limit has been exceeded. Try again later."
+        )
+      );
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", "Hello")
+      ).rejects.toMatchObject({
+        message:
+          "Rate limited by line, retry after 30s: The API rate limit has been exceeded. Try again later.",
+        retryAfter: 30,
+      });
+    });
+
+    it("keeps the plain message when LINE sends no reason", async () => {
+      const failure = makeRateLimitError();
+      mocks.pushMessage.mockRejectedValueOnce(failure);
+
+      await expect(
+        adapter.postMessage("line:bot-123:user:u-123", "Hello")
+      ).rejects.toMatchObject({
+        cause: failure,
+        message: "Rate limited by line",
+      });
+    });
 
     it("does not fall back to push when the reply attempt is rate limited", async () => {
       await seedReplyToken(adapter, {

@@ -174,10 +174,16 @@ const toRateLimitError = (
     error.headers.get("retry-after") ?? "",
     10
   );
-  return new AdapterRateLimitError(
+  const rateLimit = new AdapterRateLimitError(
     "line",
     retryAfter >= 0 ? retryAfter : undefined
   );
+  const reason = parseLineErrorMessage(error.body);
+  if (reason !== undefined) {
+    rateLimit.message = `${rateLimit.message}: ${reason}`;
+  }
+  rateLimit.cause = error;
+  return rateLimit;
 };
 
 const VERIFICATION_REPLY_TOKEN_PATTERN = /^(0+|f+)$/i;

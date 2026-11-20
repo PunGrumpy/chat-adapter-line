@@ -393,7 +393,7 @@ export interface LinePostableLocation {
  */
 export interface LinePostableFlex {
   flex: {
-    /** Notification and chat-list text. Required, and at most 400 characters. */
+    /** Notification and chat-list text. Required, and at most 1500 characters. */
     altText: string;
     contents: messagingApi.FlexContainer;
   };

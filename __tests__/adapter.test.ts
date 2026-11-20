@@ -181,6 +181,16 @@ const helloWorldChunks = async function* helloWorldChunks() {
   yield "world";
 };
 
+const failingChunks = async function* failingChunksGen(
+  error: Error,
+  ...texts: string[]
+): AsyncGenerator<string> {
+  for (const text of texts) {
+    yield text;
+  }
+  throw error;
+};
+
 const emptyChunks = async function* emptyChunks() {
   yield "";
 };
@@ -2363,6 +2373,67 @@ describe("LineAdapter", () => {
         ],
         to: "u-123",
       });
+    });
+
+    it("sends the text a stream produced before it failed, then rejects with the stream's error", async () => {
+      const failure = new Error("model stream broke");
+
+      const sent = adapter.stream(
+        "line:bot-123:user:u-123",
+        failingChunks(failure, "Hello ", "world")
+      );
+
+      await expect(sent).rejects.toBe(failure);
+      expect(mocks.pushMessage).toHaveBeenCalledExactlyOnceWith({
+        messages: [{ text: "Hello world", type: "text" }],
+        to: "u-123",
+      });
+    });
+
+    it("sends nothing when a stream fails before producing any text", async () => {
+      const failure = new Error("model stream broke");
+
+      await expect(
+        adapter.stream("line:bot-123:user:u-123", failingChunks(failure))
+      ).rejects.toBe(failure);
+
+      expect(mocks.pushMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects with the stream's error when sending the buffered text fails too", async () => {
+      const failure = new Error("model stream broke");
+      mocks.pushMessage.mockRejectedValueOnce(new Error("LINE is down"));
+
+      await expect(
+        adapter.stream(
+          "line:bot-123:user:u-123",
+          failingChunks(failure, "Hello")
+        )
+      ).rejects.toBe(failure);
+
+      expect(mocks.pushMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops renewing the loading animation once a stream has failed", async () => {
+      const failure = new Error("model stream broke");
+      mocks.showLoadingAnimation.mockResolvedValue({});
+
+      vi.useFakeTimers();
+      try {
+        const sent = adapter.stream(
+          "line:bot-123:user:u-123",
+          failingChunks(failure, "Hello")
+        );
+        const outcome = expect(sent).rejects.toBe(failure);
+
+        await vi.advanceTimersByTimeAsync(0);
+        await outcome;
+        await vi.advanceTimersByTimeAsync(60_000);
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(mocks.showLoadingAnimation).toHaveBeenCalledTimes(1);
     });
 
     it("keeps the loading animation up until a slow stream ends", async () => {

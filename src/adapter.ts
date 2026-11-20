@@ -211,14 +211,23 @@ const extractStreamText = (chunk: string | StreamChunk): string => {
   return "";
 };
 
+interface StreamedText {
+  failure?: { error: unknown };
+  markdown: string;
+}
+
 const readStreamText = async (
   textStream: AsyncIterable<string | StreamChunk>
-): Promise<string> => {
+): Promise<StreamedText> => {
   let markdown = "";
-  for await (const chunk of textStream) {
-    markdown += extractStreamText(chunk);
+  try {
+    for await (const chunk of textStream) {
+      markdown += extractStreamText(chunk);
+    }
+  } catch (error) {
+    return { failure: { error }, markdown };
   }
-  return markdown;
+  return { markdown };
 };
 
 const readRequestId = (response: {
@@ -867,7 +876,9 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
    * it into text messages within LINE's 5000-character limit, and sends them
    * five to a request. The first request uses the thread's reply token when
    * one is fresh, so a typical reply costs no message quota. In a 1:1 chat,
-   * LINE's loading animation shows until the stream ends.
+   * LINE's loading animation shows until the stream ends. If the stream
+   * fails partway, the adapter sends the text it has collected and then
+   * rethrows the stream's error.
    */
   async stream(
     threadId: string,
@@ -876,12 +887,20 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
   ): Promise<RawMessage<LineEvent>> {
     const { sourceId } = this.decodeThreadId(threadId);
 
-    const markdown = await this.collectStream(threadId, textStream);
+    const { failure, markdown } = await this.collectStream(
+      threadId,
+      textStream
+    );
 
     const text = this.converter.fromMarkdown(markdown);
     const messages = splitText(text, MAX_TEXT_LENGTH).map((part) =>
       buildTextMessage(part)
     );
+
+    if (failure) {
+      await this.sendBufferedText(threadId, sourceId, messages);
+      throw failure.error;
+    }
 
     if (messages.length === 0) {
       this.logger.debug("Stream produced no content, skipping send");
@@ -893,10 +912,29 @@ export class LineAdapter implements Adapter<LineThreadId, LineEvent> {
     return this.buildRawMessage(result, text, threadId);
   }
 
+  private async sendBufferedText(
+    threadId: string,
+    sourceId: string,
+    messages: messagingApi.Message[]
+  ): Promise<void> {
+    if (messages.length === 0) {
+      return;
+    }
+
+    try {
+      await this.sendInBatches(threadId, sourceId, messages);
+    } catch (error) {
+      this.logger.warn("Failed to send the text a failed stream had produced", {
+        error,
+        threadId,
+      });
+    }
+  }
+
   private async collectStream(
     threadId: string,
     textStream: AsyncIterable<string | StreamChunk>
-  ): Promise<string> {
+  ): Promise<StreamedText> {
     if (!this.isDM(threadId)) {
       return readStreamText(textStream);
     }

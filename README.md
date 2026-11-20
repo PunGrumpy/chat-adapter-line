@@ -144,7 +144,7 @@ LINE caps a text message at 5000 characters, counted in UTF-16 code units the wa
 
 Text with `mentions` or `emojis` is never split, because LINE positions them by offset inside one message. The adapter measures it after mention and emoji placeholders and brace escaping are applied, and throws a `ValidationError` instead of calling LINE when that passes the cap. A post whose text is empty, or renders to nothing, such as a lone `---`, also throws a `ValidationError` before the adapter calls LINE.
 
-LINE displays no Markdown, so the adapter renders Markdown and AST postables as plain text. It drops emphasis and heading marks. Code keeps its exact text without fences, a link keeps its URL as `text (url)`, and list items keep their `-` or `1.` markers. The adapter never reads inbound text as Markdown either, so `message.formatted` holds exactly what the user typed.
+LINE displays no Markdown, so the adapter renders Markdown and AST postables as plain text. It drops emphasis and heading marks. Code keeps its exact text without fences, a link keeps its URL as `text (url)`, and list items keep their `-` or `1.` markers. A task list keeps its `[x]` and `[ ]` checkboxes, a link inside a table keeps its URL, and a footnote keeps its `[1]` marker. The adapter never reads inbound text as Markdown either, so `message.formatted` holds exactly what the user typed.
 
 ### Quoted replies
 

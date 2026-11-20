@@ -193,6 +193,16 @@ describe("toPlainText", () => {
     ).toBe("Code | Style\n-----|------\nfoo  | bold");
   });
 
+  it("renders an image inside a table cell like an image anywhere else", () => {
+    expect(
+      toPlainText(
+        "| Logo | Name |\n| --- | --- |\n| ![logo](https://example.com/a.png) | Acme |"
+      )
+    ).toBe(
+      "Logo                             | Name\n---------------------------------|-----\nlogo (https://example.com/a.png) | Acme"
+    );
+  });
+
   it("keeps unordered task-list checkboxes", () => {
     expect(toPlainText("- [x] done\n- [ ] todo")).toBe(
       "- [x] done\n- [ ] todo"

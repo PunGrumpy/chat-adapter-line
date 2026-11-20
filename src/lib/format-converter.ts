@@ -11,11 +11,13 @@ import {
   isTableNode,
   paragraph,
   root,
-  tableToAscii,
+  tableElementToAscii,
   text,
 } from "chat";
 
 import { renderSdkEmoji } from "./emojis.js";
+
+type ListNode = Extract<Content, { type: "list" }>;
 
 const AUTOLINK_SCHEMES = ["mailto:", "http://", "https://"] as const;
 
@@ -28,8 +30,8 @@ const isBareUrl = (label: string, url: string): boolean =>
  *
  * LINE renders no Markdown in either direction. Inbound text is taken
  * literally, and outbound Markdown is flattened to plain text straight from
- * its AST: formatting markers are dropped, while code, link targets, and list
- * markers are kept.
+ * its AST: formatting markers are dropped, while code, link targets, list
+ * markers, and task-list checkboxes are kept.
  */
 export class LineFormatConverter extends BaseFormatConverter {
   toAst(platformText: string): Root {
@@ -60,20 +62,16 @@ export class LineFormatConverter extends BaseFormatConverter {
       return "";
     }
     if (isListNode(node)) {
-      return this.renderList(node, 0, convert);
+      return this.renderList(this.withTaskMarkers(node), 0, convert);
     }
     if (isTableNode(node)) {
-      return tableToAscii(node);
+      return this.renderTable(node, convert);
     }
     if (isBlockquoteNode(node)) {
       return this.renderBlocks(getNodeChildren(node));
     }
     if (isLinkNode(node)) {
-      const label = getNodeChildren(node).map(convert).join("");
-      if (label === "") {
-        return node.url;
-      }
-      return isBareUrl(label, node.url) ? label : `${label} (${node.url})`;
+      return this.renderLink(node, convert);
     }
     if (node.type === "image") {
       return node.alt ? `${node.alt} (${node.url})` : node.url;
@@ -81,6 +79,63 @@ export class LineFormatConverter extends BaseFormatConverter {
     if (node.type === "definition") {
       return `[${node.label ?? node.identifier}]: ${node.url}`;
     }
+    if (node.type === "imageReference") {
+      return node.alt ?? "";
+    }
+    if (node.type === "footnoteReference") {
+      return `[${node.label ?? node.identifier}]`;
+    }
+    if (node.type === "footnoteDefinition") {
+      return `[${node.label ?? node.identifier}]: ${this.renderBlocks(getNodeChildren(node))}`;
+    }
     return this.defaultNodeToText(node, convert);
+  }
+
+  private renderLink(
+    node: Extract<Content, { type: "link" }>,
+    convert: (child: Content) => string
+  ): string {
+    const label = getNodeChildren(node).map(convert).join("");
+    if (label === "") {
+      return node.url;
+    }
+    return isBareUrl(label, node.url) ? label : `${label} (${node.url})`;
+  }
+
+  private renderTable(
+    node: Content,
+    convert: (child: Content) => string
+  ): string {
+    const [headers = [], ...rows] = getNodeChildren(node).map((row) =>
+      getNodeChildren(row).map((cell) =>
+        getNodeChildren(cell).map(convert).join("")
+      )
+    );
+    return tableElementToAscii(headers, rows);
+  }
+
+  private withTaskMarkers(list: ListNode): ListNode {
+    return {
+      ...list,
+      children: list.children.map((item) => this.markTaskItem(item)),
+    };
+  }
+
+  private markTaskItem(
+    item: ListNode["children"][number]
+  ): ListNode["children"][number] {
+    const children = item.children.map((child) =>
+      child.type === "list" ? this.withTaskMarkers(child) : child
+    );
+    const [first, ...rest] = children;
+    if (typeof item.checked !== "boolean" || first?.type !== "paragraph") {
+      return { ...item, children };
+    }
+
+    const marker = text(item.checked ? "[x] " : "[ ] ");
+    return {
+      ...item,
+      children: [{ ...first, children: [marker, ...first.children] }, ...rest],
+    };
   }
 }

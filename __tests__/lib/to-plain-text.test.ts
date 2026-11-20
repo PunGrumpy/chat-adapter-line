@@ -1,6 +1,7 @@
-import { emoji } from "chat";
+import { emoji, parseMarkdown } from "chat";
 import { describe, expect, it } from "vite-plus/test";
 
+import { LineFormatConverter } from "../../src/lib/format-converter.js";
 import { toPlainText } from "../../src/lib/to-plain-text.js";
 
 describe("toPlainText", () => {
@@ -174,6 +175,75 @@ describe("toPlainText", () => {
     expect(toPlainText("| a | b |\n| - | - |\n| 1 | 2 |")).toBe(
       "a | b\n--|--\n1 | 2"
     );
+  });
+
+  it("keeps link URLs inside table cells", () => {
+    expect(
+      toPlainText(
+        "| Item | Link |\n| --- | --- |\n| Docs | [open](https://example.com/docs) |"
+      )
+    ).toBe(
+      "Item | Link\n-----|--------------------------------\nDocs | open (https://example.com/docs)"
+    );
+  });
+
+  it("renders inline code and emphasis inside table cells", () => {
+    expect(
+      toPlainText("| Code | Style |\n| --- | --- |\n| `foo` | **bold** |")
+    ).toBe("Code | Style\n-----|------\nfoo  | bold");
+  });
+
+  it("renders an image inside a table cell like an image anywhere else", () => {
+    expect(
+      toPlainText(
+        "| Logo | Name |\n| --- | --- |\n| ![logo](https://example.com/a.png) | Acme |"
+      )
+    ).toBe(
+      "Logo                             | Name\n---------------------------------|-----\nlogo (https://example.com/a.png) | Acme"
+    );
+  });
+
+  it("keeps unordered task-list checkboxes", () => {
+    expect(toPlainText("- [x] done\n- [ ] todo")).toBe(
+      "- [x] done\n- [ ] todo"
+    );
+  });
+
+  it("keeps ordered task-list checkboxes", () => {
+    expect(toPlainText("1. [x] one\n2. [ ] two")).toBe(
+      "1. [x] one\n2. [ ] two"
+    );
+  });
+
+  it("keeps nested task-list checkboxes", () => {
+    expect(toPlainText("- [ ] parent\n  - [x] child\n  - plain")).toBe(
+      "- [ ] parent\n  - [x] child\n  - plain"
+    );
+  });
+
+  it("keeps footnote markers and definitions", () => {
+    expect(toPlainText("Fact[^1].\n\n[^1]: Source text.")).toBe(
+      "Fact[1].\n\n[1]: Source text."
+    );
+  });
+
+  it("keeps image-reference alt text and its definition", () => {
+    expect(
+      toPlainText("![logo][img]\n\n[img]: https://example.com/a.png")
+    ).toBe("logo\n\n[img]: https://example.com/a.png");
+  });
+
+  it("renders a task-list AST twice without mutating it", () => {
+    const ast = parseMarkdown("- [ ] parent\n  - [x] child\n  - plain");
+    const original = structuredClone(ast);
+    const converter = new LineFormatConverter();
+
+    const first = converter.fromAst(ast);
+    const second = converter.fromAst(ast);
+
+    expect(first).toBe("- [ ] parent\n  - [x] child\n  - plain");
+    expect(second).toBe(first);
+    expect(ast).toEqual(original);
   });
 
   it("keeps inline HTML as written", () => {
